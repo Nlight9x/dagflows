@@ -1,0 +1,8 @@
+apache-airflow==2.9.2
+apache-airflow-providers-postgres
+apache-airflow-providers-amazon
+apache-airflow-providers-google
+psycopg2-binary
+google-cloud-storage
+boto3
+pandas 

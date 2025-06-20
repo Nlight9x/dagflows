@@ -47,11 +47,12 @@ def download_involve_asia_data(**context):
 
 
 with DAG(
-    dag_id="affiliate_download_dag",
+    dag_display_name="[ADS] - Download report data. ",
+    dag_id="ads_aff_download_data",
     start_date=datetime(2024, 1, 1),
     schedule_interval=None,
     catchup=False,
-    tags=["affiliate"],
+    tags=["ads"],
 ) as dag:
     download_task = PythonOperator(
         task_display_name="Download InvolveAsia data",

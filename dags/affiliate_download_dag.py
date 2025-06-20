@@ -8,10 +8,11 @@ import os
 from utils.affiliate_connector import InvolveAsyncConnector
 from utils.exporter import export_involve_conversion_to_csv
 
-def download_affiliate_data(**context):
-    secret_key = Variable.get("affiliate_secret_key")
+
+def download_involve_asia_data(**context):
+    secret_key = Variable.get("involve_asia_secret_key_1")
     output_path = os.path.join(os.path.dirname(__file__), "../data/affiliate_data.csv")
-    state_key = "affiliate_downloaded_once"
+    state_key = "involve_asia_downloaded_once"
 
     # Kiểm tra trạng thái đã từng chạy chưa
     downloaded_once = Variable.get(state_key, default_var="0") == "1"
@@ -44,6 +45,7 @@ def download_affiliate_data(**context):
 
     asyncio.run(fetch_and_save())
 
+
 with DAG(
     dag_id="affiliate_download_dag",
     start_date=datetime(2024, 1, 1),
@@ -52,7 +54,8 @@ with DAG(
     tags=["affiliate"],
 ) as dag:
     download_task = PythonOperator(
-        task_id="download_affiliate_data",
-        python_callable=download_affiliate_data,
+        task_display_name="Download InvolveAsia data",
+        task_id="download_involve_asia_acc_1_data",
+        python_callable=download_involve_asia_data,
         provide_context=True,
     ) 

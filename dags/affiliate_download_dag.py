@@ -56,3 +56,16 @@ with DAG(
         python_callable=download_affiliate_data,
         provide_context=True,
     ) 
+
+with DAG(
+    dag_id="affiliate_download_dag_2",
+    start_date=datetime(2024, 1, 1),
+    schedule_interval=None,
+    catchup=False,
+    tags=["affiliate"],
+) as dag:
+    download_task = PythonOperator(
+        task_id="download_affiliate_data",
+        python_callable=download_affiliate_data,
+        provide_context=True,
+    ) 

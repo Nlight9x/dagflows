@@ -11,7 +11,7 @@ from utils.exporter import export_involve_conversion_to_csv
 
 def download_involve_asia_data(**context):
     secret_key = Variable.get("involve_asia_secret_key_1")
-    output_path = os.path.join(os.path.dirname(__file__), "../data/affiliate_data.csv")
+    output_path = os.path.join(os.path.dirname(__file__), "/opt/airflow/data/affiliate_data.csv")
     state_key = "involve_asia_downloaded_once"
 
     # Kiểm tra trạng thái đã từng chạy chưa

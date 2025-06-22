@@ -6,8 +6,8 @@ import asyncio
 import os
 
 from utils.affiliate_connector import InvolveAsyncConnector
-from utils.storage_exporter import CsvExporter
-from utils.storage_connector import NocodbConnector
+from utils.storage_exporter import CsvExporter, NocodbExporter
+
 
 def download_and_export_csv_affiliate_data(**context):
     secret_key = Variable.get("affiliate_secret_key")
@@ -49,9 +49,10 @@ def download_and_export_csv_affiliate_data(**context):
     all_data = asyncio.run(fetch_all_data())
     export_csv(all_data)
 
+
 def download_and_export_nocodb_affiliate_data(**context):
-    secret_key = Variable.get("involve_asisa_secret_key_1")
-    nocodb_api_url = Variable.get("nocodb_api_url")
+    secret_key = Variable.get("involve_asia_secret_key_1")
+    nocodb_api_url = Variable.get("nocodb_involve_asia_conversion_put_endpoint")
     nocodb_token = Variable.get("nocodb_token")
     state_key = "affiliate_downloaded_once"
 
@@ -82,8 +83,9 @@ def download_and_export_nocodb_affiliate_data(**context):
         return all_data
 
     all_data = asyncio.run(fetch_all_data())
-    connector = NocodbConnector(api_url=nocodb_api_url, token=nocodb_token)
-    connector.push(all_data)
+    connector = NocodbExporter(api_url=nocodb_api_url, token=nocodb_token)
+    connector.export(all_data)
+
 
 with DAG(
     dag_id="affiliate_download_dag",

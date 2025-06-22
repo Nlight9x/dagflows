@@ -35,6 +35,7 @@ class InvolveAsyncConnector(AsyncConnector):
 
     async def authenticate(self):
         data = {"secret": self._secret_key, "key": "general"}
+        print(data)
         async with httpx.AsyncClient() as client:
             response = await client.post(self._auth_url, headers=self._default_header, data=data)
             if response.status_code == 200:

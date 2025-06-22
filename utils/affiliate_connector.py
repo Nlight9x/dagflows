@@ -52,6 +52,7 @@ class InvolveAsyncConnector(AsyncConnector):
                 else:
                     return await self._get_all_conversion(**params)
             except Exception as e:
+                print(f"Try {retry}")
                 retry += 1
                 if retry == 3:
                     raise e

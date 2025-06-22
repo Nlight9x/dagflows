@@ -26,6 +26,7 @@ class NocodbExporter(StorageExporter):
             "xc-token": self._token,
             "Content-Type": "application/json"
         }
+        print(headers)
         responses = []
         total = len(data)
         for i in range(0, total, batch_size):
@@ -47,7 +48,7 @@ class CsvExporter:
             raise ValueError("Data must be a list of dicts")
         if len(data) == 0:
             return
-        with open(filepath, mode='w', newline='', encoding='utf-8') as f:
+        with open(self._filepath, mode='w', newline='', encoding='utf-8') as f:
             writer = csv.DictWriter(f, fieldnames=data[0].keys())
             writer.writeheader()
             writer.writerows(data)

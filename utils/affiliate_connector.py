@@ -44,10 +44,19 @@ class InvolveAsyncConnector(AsyncConnector):
                     self._token = res_body.get('data', _empty_dict).get('token')
 
     async def get_conversion(self, **params):
-        if params.get("start_date") and params.get("end_date"):
-            return await self._get_range_conversion(**params)
-        else:
-            return await self._get_all_conversion(**params)
+        retry = 0 
+        while retry < 3:
+            try:
+                if params.get("start_date") and params.get("end_date"):
+                    return await self._get_range_conversion(**params)
+                else:
+                    return await self._get_all_conversion(**params)
+            except Exception as e:
+                retry += 1
+                if retry == 3:
+                    raise e
+                await asyncio.sleep(1)
+        return None, False
 
     async def _fetch_conversion(self, url, data):
         if not self._token:

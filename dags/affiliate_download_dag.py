@@ -95,7 +95,7 @@ def download_and_export_nocodb_galaksion_data(**context):
     galaksion_email = cred["email"]
     galaksion_password = cred["password"]
     
-    nocodb_api_url = Variable.get("nocodb_galaksion_report_put_endpoint")
+    nocodb_api_url = Variable.get("nocodb_galaksion_statistics_put_endpoint")
     nocodb_token = Variable.get("nocodb_token")
     state_key = "galaksion_downloaded_once"
     downloaded_once = Variable.get(state_key, default_var="0") == "1"

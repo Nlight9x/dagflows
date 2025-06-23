@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import asyncio
 import os
 import json
+import httpx
 
 from utils.affiliate_connector import InvolveAsyncConnector
 from utils.storage_exporter import CsvExporter, NocodbExporter
@@ -119,21 +120,57 @@ def download_and_export_nocodb_galaksion_data(**context):
     async def load_and_push_for_day(day, connector, exporter, limit, buffer_size, order_by, group_by):
         offset = 0
         buffer = []
+        accumulated_money = 0.0
+        total_money = None
+        percent_threshold = float(Variable.get('galaksion_money_percent_threshold', default_var='0.99'))
         def has_money_gt_zero(records):
             if not records:
                 return False
             return float(records[0].get("money", 0)) > 0
+        
         def push_buffer():
             if buffer:
                 exporter.export(transform_data(buffer.copy()))
                 buffer.clear()
+        async def fetch_with_retry(retry_count=3, delay_seconds=1):
+            nonlocal offset
+            for attempt in range(retry_count):
+                try:
+                    response, has_next = await connector.get_reports(
+                        date_from=day, date_to=day, limit=limit, offset=offset, order_by=order_by, group_by=group_by
+                    )
+                    await asyncio.sleep(delay_seconds)
+                    return response, has_next
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code == 429 and attempt < retry_count - 1:
+                        wait_time = (attempt + 1) * delay_seconds * 2
+                        print(f"429 Too Many Requests, waiting {wait_time}s before retry...")
+                        await asyncio.sleep(wait_time)
+                        continue
+                    raise
+                except Exception as e:
+                    raise
+            return None, False
+
         while True:
-            data, has_next = await connector.get_reports(date_from=day, date_to=day, limit=limit, offset=offset, order_by=order_by, group_by=group_by)
-            if data:
-                buffer.extend(data)
-                if len(buffer) >= buffer_size:
-                    push_buffer()
-            if not (has_next and has_money_gt_zero(data)):
+            response, has_next = await fetch_with_retry()
+            if not response:
+                break
+            rows = response.get('rows', [])
+            buffer.extend(rows)
+            # Cộng dồn money của tất cả các row đã load
+            accumulated_money += sum(float(item.get('money', 0)) for item in rows)
+            # Lấy total_money từ response đầu tiên
+            if total_money is None and 'total' in response and 'money' in response['total']:
+                try:
+                    total_money = float(response['total']['money'])
+                except Exception:
+                    total_money = None
+            if len(buffer) >= buffer_size:
+                push_buffer()
+            # Điều kiện dừng: đạt ngưỡng tổng tiền hoặc hết trang hoặc hết tiền
+            if (total_money and accumulated_money >= percent_threshold * total_money) or not has_next or not has_money_gt_zero(rows):
+                print(f"Stopped: Reached {percent_threshold*100:.2f}% of total money or finished paging. Accumulated: {accumulated_money}/{total_money}")
                 break
             offset += limit
         push_buffer()

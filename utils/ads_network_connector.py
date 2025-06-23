@@ -79,14 +79,18 @@ class GalaksionAsyncConnector(AdsNetworkAsyncConnector):
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 f"{self._reports_url}?{urlencode(params)}", headers=headers, timeout=30.0)
+            if response.status_code == 429:
+                # Raise HTTPStatusError để DAG nhận biết và retry
+                raise httpx.HTTPStatusError("Too Many Requests", request=response.request, response=response)
             if response.status_code == 200:
                 res = response.json()
                 # Xác định has_next dựa vào countRows == limit
                 if isinstance(res, dict):
-                    data = res.get('rows', [])
                     count_rows = res.get('countRows', 0)
                     has_next = count_rows == limit
-                    return data, has_next
-                return [], False
-            return [], False
+                    return res, has_next
+                return {}, False
+            # Raise cho các lỗi khác
+            response.raise_for_status()
+            return {}, False
 

@@ -100,7 +100,7 @@ def download_and_export_nocodb_galaksion_data(**context):
     state_key = "galaksion_downloaded_once"
     downloaded_once = Variable.get(state_key, default_var="0") == "1"
 
-    async def load_and_push_for_day(day, connector, exporter, limit, buffer_size, order_by):
+    async def load_and_push_for_day(day, connector, exporter, limit, buffer_size, order_by, group_by):
         offset = 0
         buffer = []
         def has_money_gt_zero(records):
@@ -112,7 +112,7 @@ def download_and_export_nocodb_galaksion_data(**context):
                 exporter.export(buffer.copy())
                 buffer.clear()
         while True:
-            data, has_next = await connector.get_reports(date_from=day, date_to=day, limit=limit, offset=offset, order_by=order_by)
+            data, has_next = await connector.get_reports(date_from=day, date_to=day, limit=limit, offset=offset, order_by=order_by, group_by=group_by)
             if data:
                 buffer.extend(data)
                 if len(buffer) >= buffer_size:
@@ -128,6 +128,7 @@ def download_and_export_nocodb_galaksion_data(**context):
         limit = 100
         buffer_size = 1000
         order_by = {"field": "money", "direction": "desc"}
+        group_by = ["day", "campaign", "zone", "geo"]
         exporter = NocodbExporter(api_url=nocodb_api_url, token=nocodb_token)
         def format_day(dt):
             return dt.strftime("%Y-%m-%d 00:00:00")
@@ -135,12 +136,12 @@ def download_and_export_nocodb_galaksion_data(**context):
             for i in range(14, 0, -1):
                 day_dt = datetime.now() - timedelta(days=i)
                 day = format_day(day_dt)
-                await load_and_push_for_day(day, connector, exporter, limit, buffer_size, order_by)
+                await load_and_push_for_day(day, connector, exporter, limit, buffer_size, order_by, group_by)
             Variable.set(state_key, "1")
         else:
             yesterday_dt = datetime.now() - timedelta(days=1)
             yesterday = format_day(yesterday_dt)
-            await load_and_push_for_day(yesterday, connector, exporter, limit, buffer_size, order_by)
+            await load_and_push_for_day(yesterday, connector, exporter, limit, buffer_size, order_by, group_by)
 
     asyncio.run(fetch_and_push_galaksion_data())
 

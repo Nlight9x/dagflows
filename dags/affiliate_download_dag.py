@@ -4,9 +4,11 @@ from airflow.models import Variable
 from datetime import datetime, timedelta
 import asyncio
 import os
+import json
 
 from utils.affiliate_connector import InvolveAsyncConnector
 from utils.storage_exporter import CsvExporter, NocodbExporter
+from utils.ads_network_connector import GalaksionAsyncConnector
 
 
 def download_and_export_csv_affiliate_data(**context):
@@ -33,7 +35,7 @@ def download_and_export_csv_affiliate_data(**context):
                 page += 1
             Variable.set(state_key, "1")
         else:
-            # Các lần sau: chỉ lấy ngày hôm qua
+            # Các lần sau: Chỉ lấy ngày hôm qua
             yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
             while True:
                 data, has_next = await connector.get_conversion(start_date=yesterday, end_date=yesterday, page=str(page), limit=str(limit))
@@ -87,20 +89,76 @@ def download_and_export_nocodb_affiliate_data(**context):
     connector.export(all_data)
 
 
+def download_and_export_nocodb_galaksion_data(**context):
+    galaksion_credential = Variable.get("galaksion_credential")
+    cred = json.loads(galaksion_credential)
+    galaksion_email = cred["email"]
+    galaksion_password = cred["password"]
+    
+    nocodb_api_url = Variable.get("nocodb_galaksion_report_put_endpoint")
+    nocodb_token = Variable.get("nocodb_token")
+    state_key = "galaksion_downloaded_once"
+    downloaded_once = Variable.get(state_key, default_var="0") == "1"
+
+    async def load_and_push_for_day(day, connector, exporter, limit, buffer_size, order_by):
+        offset = 0
+        buffer = []
+        def has_money_gt_zero(records):
+            if not records:
+                return False
+            return float(records[0].get("money", 0)) > 0
+        def push_buffer():
+            if buffer:
+                exporter.export(buffer.copy())
+                buffer.clear()
+        while True:
+            data, has_next = await connector.get_reports(date_from=day, date_to=day, limit=limit, offset=offset, order_by=order_by)
+            if data:
+                buffer.extend(data)
+                if len(buffer) >= buffer_size:
+                    push_buffer()
+            if not (has_next and has_money_gt_zero(data)):
+                break
+            offset += limit
+        push_buffer()
+
+    async def fetch_and_push_galaksion_data():
+        connector = GalaksionAsyncConnector(email=galaksion_email, password=galaksion_password)
+        await connector.authenticate()
+        limit = 100
+        buffer_size = 1000
+        order_by = {"field": "money", "direction": "desc"}
+        exporter = NocodbExporter(api_url=nocodb_api_url, token=nocodb_token)
+        if not downloaded_once:
+            for i in range(14, 0, -1):
+                day = (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
+                await load_and_push_for_day(day, connector, exporter, limit, buffer_size, order_by)
+            Variable.set(state_key, "1")
+        else:
+            yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+            await load_and_push_for_day(yesterday, connector, exporter, limit, buffer_size, order_by)
+
+    asyncio.run(fetch_and_push_galaksion_data())
+
+
 with DAG(
-    dag_id="affiliate_download_dag",
+    dag_display_name="[ADS] - Download report data",
+    dag_id="ads_download_report_data",
     start_date=datetime(2024, 1, 1),
     schedule_interval=None,
     catchup=False,
     tags=["affiliate"],
 ) as dag:
-    # download_task = PythonOperator(
-    #     task_id="download_affiliate_data",
-    #     python_callable=download_and_export_csv_affiliate_data,
-    #     provide_context=True,
-    # )
     export_to_nocodb_task = PythonOperator(
-        task_id="push_affiliate_to_nocodb",
+        task_display_name="Download InvolveAsia conversions",
+        task_id="get_and_save_involve_data_to_nocodb",
         python_callable=download_and_export_nocodb_affiliate_data,
         provide_context=True,
-    ) 
+    )
+
+    export_to_nocodb_galaksion_task = PythonOperator(
+        task_display_name="Download Galaksion statistics",
+        task_id="get_and_save_galaksion_data_to_nocodb",
+        python_callable=download_and_export_nocodb_galaksion_data,
+        provide_context=True,
+    )

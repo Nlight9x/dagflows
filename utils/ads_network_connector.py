@@ -80,6 +80,13 @@ class GalaksionAsyncConnector(AdsNetworkAsyncConnector):
             response = await client.get(
                 f"{self._reports_url}?{urlencode(params)}", headers=headers, timeout=30.0)
             if response.status_code == 200:
-                return response.json()
-            return None
+                res = response.json()
+                # Xác định has_next dựa vào countRows == limit
+                if isinstance(res, dict):
+                    data = res.get('rows', [])
+                    count_rows = res.get('countRows', 0)
+                    has_next = count_rows == limit
+                    return data, has_next
+                return [], False
+            return [], False
 

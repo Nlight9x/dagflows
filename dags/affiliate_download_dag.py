@@ -129,13 +129,17 @@ def download_and_export_nocodb_galaksion_data(**context):
         buffer_size = 1000
         order_by = {"field": "money", "direction": "desc"}
         exporter = NocodbExporter(api_url=nocodb_api_url, token=nocodb_token)
+        def format_day(dt):
+            return dt.strftime("%Y-%m-%d 00:00:00")
         if not downloaded_once:
             for i in range(14, 0, -1):
-                day = (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
+                day_dt = datetime.now() - timedelta(days=i)
+                day = format_day(day_dt)
                 await load_and_push_for_day(day, connector, exporter, limit, buffer_size, order_by)
             Variable.set(state_key, "1")
         else:
-            yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+            yesterday_dt = datetime.now() - timedelta(days=1)
+            yesterday = format_day(yesterday_dt)
             await load_and_push_for_day(yesterday, connector, exporter, limit, buffer_size, order_by)
 
     asyncio.run(fetch_and_push_galaksion_data())

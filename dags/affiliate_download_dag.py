@@ -10,6 +10,8 @@ from utils.affiliate_connector import InvolveAsyncConnector
 from utils.storage_exporter import CsvExporter, NocodbExporter
 from utils.ads_network_connector import GalaksionAsyncConnector
 
+# Chỉ dùng cho dữ liệu Galaksion
+from datetime import datetime as dt
 
 def download_and_export_csv_affiliate_data(**context):
     secret_key = Variable.get("affiliate_secret_key")
@@ -100,6 +102,20 @@ def download_and_export_nocodb_galaksion_data(**context):
     state_key = "galaksion_downloaded_once"
     downloaded_once = Variable.get(state_key, default_var="0") == "1"
 
+    def transform_data(data):
+        transformed_data = []
+        for item in data:
+            new_item = {k: v for k, v in item.items() if k != 'id'}
+            if 'day' in new_item:
+                try:
+                    day_obj = dt.strptime(new_item['day'], '%d/%m/%Y')
+                    new_item['date'] = day_obj.strftime('%Y-%m-%d')
+                    del new_item['day']
+                except Exception:
+                    pass
+            transformed_data.append(new_item)
+        return transformed_data
+
     async def load_and_push_for_day(day, connector, exporter, limit, buffer_size, order_by, group_by):
         offset = 0
         buffer = []
@@ -109,7 +125,7 @@ def download_and_export_nocodb_galaksion_data(**context):
             return float(records[0].get("money", 0)) > 0
         def push_buffer():
             if buffer:
-                exporter.export(buffer.copy())
+                exporter.export(transform_data(buffer.copy()))
                 buffer.clear()
         while True:
             data, has_next = await connector.get_reports(date_from=day, date_to=day, limit=limit, offset=offset, order_by=order_by, group_by=group_by)

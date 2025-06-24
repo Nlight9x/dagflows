@@ -26,7 +26,7 @@ class NocodbExporter(StorageExporter):
             "xc-token": self._token,
             "Content-Type": "application/json"
         }
-        print(headers)
+        # print(headers)
         responses = []
         total = len(data)
         for i in range(0, total, batch_size):

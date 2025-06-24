@@ -132,7 +132,7 @@ def download_and_export_nocodb_galaksion_data(**context):
             if buffer:
                 exporter.export(transform_data(buffer.copy()))
                 buffer.clear()
-        async def fetch_with_retry(retry_count=3, delay_seconds=1):
+        async def fetch_with_retry(retry_count=3, delay_seconds=3):
             nonlocal offset
             for attempt in range(retry_count):
                 try:

@@ -42,7 +42,7 @@ class NocodbExporter(StorageExporter):
                     retry += 1
                     if retry < 3:
                         print(f"Retry Nocodb export, attempt {retry+1}/3...")
-                        time.sleep(10)
+                        time.sleep(20)
                     else:
                         print(f"Nocodb export failed after 3 attempts: {e}")
                         raise

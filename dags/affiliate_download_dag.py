@@ -56,11 +56,11 @@ def download_and_export_csv_affiliate_data(**context):
     export_csv(all_data)
 
 
-def download_and_export_nocodb_affiliate_data(**context):
+def download_and_export_nocodb_involve_data(**context):
     secret_key = Variable.get("involve_asia_secret_key_1")
     nocodb_api_url = Variable.get("nocodb_involve_asia_conversion_put_endpoint")
     nocodb_token = Variable.get("nocodb_token")
-    state_key = "affiliate_downloaded_once"
+    state_key = "involve_asia_downloaded_once"
 
     downloaded_once = Variable.get(state_key, default_var="0") == "1"
 
@@ -229,7 +229,7 @@ with DAG(
     export_to_nocodb_task = PythonOperator(
         task_display_name="Download InvolveAsia conversions",
         task_id="get_and_save_involve_data_to_nocodb",
-        python_callable=download_and_export_nocodb_affiliate_data,
+        python_callable=download_and_export_nocodb_involve_data,
         provide_context=True,
     )
 

@@ -3,6 +3,7 @@ import math
 import asyncio
 import csv
 import os
+import time
 
 
 class StorageExporter:
@@ -26,14 +27,25 @@ class NocodbExporter(StorageExporter):
             "xc-token": self._token,
             "Content-Type": "application/json"
         }
-        # print(headers)
         responses = []
         total = len(data)
         for i in range(0, total, batch_size):
             batch = data[i:i+batch_size]
-            resp = httpx.post(self._api_url, headers=headers, json=batch, timeout=30.0)
-            resp.raise_for_status()
-            responses.append(resp.json())
+            retry = 0
+            while retry < 3:
+                try:
+                    resp = httpx.post(self._api_url, headers=headers, json=batch, timeout=30.0)
+                    resp.raise_for_status()
+                    responses.append(resp.json())
+                    break  # Thành công thì thoát vòng lặp retry
+                except Exception as e:
+                    retry += 1
+                    if retry < 3:
+                        print(f"Retry Nocodb export, attempt {retry+1}/3...")
+                        time.sleep(10)
+                    else:
+                        print(f"Nocodb export failed after 3 attempts: {e}")
+                        raise
         return responses
 
 

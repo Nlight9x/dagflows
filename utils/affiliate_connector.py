@@ -52,11 +52,13 @@ class InvolveAsyncConnector(AsyncConnector):
                 else:
                     return await self._get_all_conversion(**params)
             except Exception as e:
-                print(f"Try {retry}")
                 retry += 1
-                if retry == 3:
-                    raise e
-                await asyncio.sleep(1)
+                if retry < 3:
+                    print(f"Retrying connection to InvolveAsia, attempt {retry+1}/3...")
+                    await asyncio.sleep(20)
+                else:
+                    print(f"InvolveAsia connection failed after 3 attempts: {e}")
+                    raise
         return None, False
 
     async def _fetch_conversion(self, url, data):

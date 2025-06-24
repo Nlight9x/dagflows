@@ -38,10 +38,11 @@ def download_and_export_csv_affiliate_data(**context):
                 page += 1
             Variable.set(state_key, "1")
         else:
-            # Các lần sau: Chỉ lấy ngày hôm qua
-            yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+            # Các lần sau: lấy ngày theo execution_date
+            execution_date = context['execution_date']
+            day = (execution_date - timedelta(days=1)).strftime("%Y-%m-%d")
             while True:
-                data, has_next = await connector.get_conversion(start_date=yesterday, end_date=yesterday, page=str(page), limit=str(limit))
+                data, has_next = await connector.get_conversion(start_date=day, end_date=day, page=str(page), limit=str(limit))
                 all_data.extend(data)
                 if not has_next:
                     break
@@ -78,9 +79,10 @@ def download_and_export_nocodb_affiliate_data(**context):
                 page += 1
             Variable.set(state_key, "1")
         else:
-            yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+            execution_date = context['execution_date']
+            day = (execution_date - timedelta(days=1)).strftime("%Y-%m-%d")
             while True:
-                data, has_next = await connector.get_conversion(start_date=yesterday, end_date=yesterday, page=str(page), limit=str(limit))
+                data, has_next = await connector.get_conversion(start_date=day, end_date=day, page=str(page), limit=str(limit))
                 all_data.extend(data)
                 if not has_next:
                     break
@@ -209,9 +211,9 @@ def download_and_export_nocodb_galaksion_data(**context):
                 await load_and_push_for_day(day, connector, exporter, limit, buffer_size, order_by, group_by)
             Variable.set(state_key, "1")
         else:
-            yesterday_dt = datetime.now() - timedelta(days=1)
-            yesterday = format_day(yesterday_dt)
-            await load_and_push_for_day(yesterday, connector, exporter, limit, buffer_size, order_by, group_by)
+            execution_date = context['execution_date']
+            day = format_day(execution_date - timedelta(days=1))
+            await load_and_push_for_day(day, connector, exporter, limit, buffer_size, order_by, group_by)
 
     asyncio.run(fetch_and_push_galaksion_data())
 

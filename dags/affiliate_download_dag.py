@@ -220,7 +220,7 @@ with DAG(
     dag_display_name="[ADS] - Download report data",
     dag_id="ads_download_report_data",
     start_date=datetime(2024, 1, 1),
-    schedule_interval=None,
+    schedule_interval="0 10 * * *",
     catchup=False,
     tags=["affiliate"],
 ) as dag:

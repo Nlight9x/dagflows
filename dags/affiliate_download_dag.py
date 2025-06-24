@@ -122,8 +122,9 @@ def download_and_export_nocodb_galaksion_data(**context):
         buffer = []
         accumulated_money = 0.0
         total_money = None
-        delay_seconds = 3
+        total_data = None  # Lưu toàn bộ thông tin total
         percent_threshold = float(Variable.get('galaksion_money_percent_threshold', default_var='0.7'))
+
         def has_money_gt_zero(records):
             if not records:
                 return False
@@ -133,8 +134,8 @@ def download_and_export_nocodb_galaksion_data(**context):
             if buffer:
                 exporter.export(transform_data(buffer.copy()))
                 buffer.clear()
-        
-        async def fetch_with_retry(retry_count=3):
+
+        async def fetch_with_retry(retry_count=3, delay_seconds=5):
             nonlocal offset
             for attempt in range(retry_count):
                 try:
@@ -162,21 +163,28 @@ def download_and_export_nocodb_galaksion_data(**context):
             buffer.extend(rows)
             # Cộng dồn money của tất cả các row đã load
             accumulated_money += sum(float(item.get('money', 0)) for item in rows)
-            # Lấy total_money từ response đầu tiên
-            if total_money is None and 'total' in response and 'money' in response['total']:
+            # Lấy total_money và total_data từ response đầu tiên
+            if total_money is None and 'total' in response:
                 try:
                     total_money = float(response['total']['money'])
+                    # Lưu lại toàn bộ thông tin total
+                    total_data = {
+                        'date': day, 'campaign': 'total', 'zone': 'total', 'geo': 'total',
+                        **response['total']
+                    }
                 except Exception:
                     total_money = None
             if len(buffer) >= buffer_size:
                 push_buffer()
-                await asyncio.sleep(delay_seconds)
-            # Điều kiện dừng: đạt ngưỡng tổng tiền hoặc hết trang hoặc hết tiền
             if (total_money and accumulated_money >= percent_threshold * total_money) or not has_next or not has_money_gt_zero(rows):
                 print(f"Stopped: Reached {percent_threshold*100:.2f}% of total money or finished paging. Accumulated: {accumulated_money}/{total_money}")
                 break
             offset += limit
+        # Đẩy nốt buffer cuối cùng nếu còn
         push_buffer()
+        # Đẩy thông tin total vào NocoDB
+        if total_data:
+            exporter.export([total_data])
 
     async def fetch_and_push_galaksion_data():
         connector = GalaksionAsyncConnector(email=galaksion_email, password=galaksion_password)
@@ -186,6 +194,7 @@ def download_and_export_nocodb_galaksion_data(**context):
         order_by = {"field": "money", "direction": "desc"}
         group_by = ["day", "campaign", "zone", "geo"]
         exporter = NocodbExporter(api_url=nocodb_api_url, token=nocodb_token)
+
         def format_day(dt):
             return dt.strftime("%Y-%m-%d 00:00:00")
         if not downloaded_once:

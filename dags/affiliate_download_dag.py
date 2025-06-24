@@ -107,6 +107,11 @@ def download_and_export_nocodb_galaksion_data(**context):
         transformed_data = []
         for item in data:
             new_item = {k: v for k, v in item.items() if k != 'id'}
+            # Tách campaign_id từ campaign
+            if 'campaign' in new_item and isinstance(new_item['campaign'], str):
+                parts = new_item['campaign'].strip().split(' ', 1)
+                if parts and parts[0].isdigit():
+                    new_item['campaign_id'] = parts[0]
             if 'day' in new_item:
                 try:
                     day_obj = dt.strptime(new_item['day'], '%d/%m/%Y')
@@ -169,7 +174,7 @@ def download_and_export_nocodb_galaksion_data(**context):
                     total_money = float(response['total']['money'])
                     # Lưu lại toàn bộ thông tin total
                     total_data = {
-                        'date': day, 'campaign': 'total', 'zone': 'total', 'geo': 'total',
+                        'date': day, 'campaign': 'Total', 'campaign_id': 'Total', 'zone': 'Total', 'geo': 'Total',
                         **response['total']
                     }
                 except Exception:

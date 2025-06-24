@@ -122,7 +122,8 @@ def download_and_export_nocodb_galaksion_data(**context):
         buffer = []
         accumulated_money = 0.0
         total_money = None
-        percent_threshold = float(Variable.get('galaksion_money_percent_threshold', default_var='0.99'))
+        delay_seconds = 3
+        percent_threshold = float(Variable.get('galaksion_money_percent_threshold', default_var='0.7'))
         def has_money_gt_zero(records):
             if not records:
                 return False
@@ -132,7 +133,8 @@ def download_and_export_nocodb_galaksion_data(**context):
             if buffer:
                 exporter.export(transform_data(buffer.copy()))
                 buffer.clear()
-        async def fetch_with_retry(retry_count=3, delay_seconds=3):
+        
+        async def fetch_with_retry(retry_count=3):
             nonlocal offset
             for attempt in range(retry_count):
                 try:
@@ -168,6 +170,7 @@ def download_and_export_nocodb_galaksion_data(**context):
                     total_money = None
             if len(buffer) >= buffer_size:
                 push_buffer()
+                await asyncio.sleep(delay_seconds)
             # Điều kiện dừng: đạt ngưỡng tổng tiền hoặc hết trang hoặc hết tiền
             if (total_money and accumulated_money >= percent_threshold * total_money) or not has_next or not has_money_gt_zero(rows):
                 print(f"Stopped: Reached {percent_threshold*100:.2f}% of total money or finished paging. Accumulated: {accumulated_money}/{total_money}")
@@ -179,7 +182,7 @@ def download_and_export_nocodb_galaksion_data(**context):
         connector = GalaksionAsyncConnector(email=galaksion_email, password=galaksion_password)
         await connector.authenticate()
         limit = 100
-        buffer_size = 1000
+        buffer_size = 500
         order_by = {"field": "money", "direction": "desc"}
         group_by = ["day", "campaign", "zone", "geo"]
         exporter = NocodbExporter(api_url=nocodb_api_url, token=nocodb_token)

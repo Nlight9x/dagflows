@@ -32,7 +32,7 @@ class NocodbExporter(StorageExporter):
         for i in range(0, total, batch_size):
             batch = data[i:i+batch_size]
             retry = 0
-            while retry < 3:
+            while retry < 5:
                 try:
                     resp = httpx.post(self._api_url, headers=headers, json=batch, timeout=30.0)
                     resp.raise_for_status()
@@ -40,11 +40,11 @@ class NocodbExporter(StorageExporter):
                     break  # Thành công thì thoát vòng lặp retry
                 except Exception as e:
                     retry += 1
-                    if retry < 3:
-                        print(f"Retry Nocodb export, attempt {retry+1}/3...")
-                        time.sleep(20)
+                    if retry < 5:
+                        print(f"Retry Nocodb export, attempt {retry+1}/5...")
+                        time.sleep(10)
                     else:
-                        print(f"Nocodb export failed after 3 attempts: {e}")
+                        print(f"Nocodb export failed after 5 attempts: {e}")
                         raise
         return responses
 

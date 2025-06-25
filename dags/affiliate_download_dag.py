@@ -6,6 +6,7 @@ import asyncio
 import os
 import json
 import httpx
+import pendulum
 
 from utils.affiliate_connector import InvolveAsyncConnector
 from utils.storage_exporter import CsvExporter, NocodbExporter
@@ -218,10 +219,11 @@ def download_and_export_nocodb_galaksion_data(**context):
     asyncio.run(fetch_and_push_galaksion_data())
 
 
+local_tz = pendulum.timezone("Asia/Ho_Chi_Minh")
 with DAG(
     dag_display_name="[ADS] - Download report data",
     dag_id="ads_download_report_data",
-    start_date=datetime(2024, 1, 1),
+    start_date=datetime(2025, 1, 1, tzinfo=local_tz),
     schedule_interval="0 10 * * *",
     catchup=False,
     tags=["affiliate"],

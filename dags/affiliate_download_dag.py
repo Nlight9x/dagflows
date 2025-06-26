@@ -212,7 +212,7 @@ def download_and_export_nocodb_galaksion_data(**context):
         else:
             day = execution_date if execution_date else datetime.now()
             days = [format_day(day)]
-
+            
         for day in days:
             await load_and_push_for_day(day, connector, exporter, limit, buffer_size, order_by, group_by)
         Variable.set(state_key, "1")
@@ -234,6 +234,8 @@ with DAG(
         task_id="get_and_save_involve_data_to_nocodb",
         python_callable=download_and_export_nocodb_involve_data,
         provide_context=True,
+        retries=3,
+        retry_delay=timedelta(minutes=2),
     )
 
     export_to_nocodb_galaksion_task = PythonOperator(

@@ -125,7 +125,7 @@ def download_and_export_nocodb_galaksion_data(**context):
             transformed_data.append(new_item)
         return transformed_data
 
-    async def load_and_push_for_day(day, connector, exporter, limit, buffer_size, order_by, group_by):
+    async def load_and_push_for_day(date_from, date_to, connector, exporter, limit, buffer_size, order_by, group_by):
         offset = 0
         buffer = []
         accumulated_money = 0.0
@@ -148,7 +148,7 @@ def download_and_export_nocodb_galaksion_data(**context):
             for attempt in range(retry_count):
                 try:
                     response, has_next = await connector.get_reports(
-                        date_from=day, date_to=day, limit=limit, offset=offset, order_by=order_by, group_by=group_by
+                        date_from=date_from, date_to=date_to, limit=limit, offset=offset, order_by=order_by, group_by=group_by
                     )
                     await asyncio.sleep(delay_seconds)
                     return response, has_next
@@ -177,7 +177,7 @@ def download_and_export_nocodb_galaksion_data(**context):
                     total_money = float(response['total']['money'])
                     # Lưu lại toàn bộ thông tin total
                     total_data = {
-                        'date': day, 'campaign': 'Total', 'campaign_id': 'Total', 'zone': 'Total', 'geo': 'Total',
+                        'date': date_from[:10], 'campaign': 'Total', 'campaign_id': 'Total', 'zone': 'Total', 'geo': 'Total',
                         **response['total']
                     }
                 except Exception:
@@ -203,18 +203,20 @@ def download_and_export_nocodb_galaksion_data(**context):
         group_by = ["day", "campaign", "zone", "geo"]
         exporter = NocodbExporter(api_url=nocodb_api_url, token=nocodb_token)
 
-        def format_day(dt):
-            return dt.strftime("%Y-%m-%d 00:00:00")
+        def get_date_range(dt):
+            day_str = dt.strftime("%Y-%m-%d")
+            return f"{day_str} 00:00:00", f"{day_str} 23:59:59"
         execution_date = context.get('execution_date') if 'execution_date' in context else None
         if not downloaded_once:
             start_day = execution_date if execution_date else datetime.now()
-            days = [format_day(start_day - timedelta(days=i)) for i in range(14)]
+            days = [start_day - timedelta(days=i) for i in range(14)]
         else:
             day = execution_date if execution_date else datetime.now()
-            days = [format_day(day)]
-            
-        for day in days:
-            await load_and_push_for_day(day, connector, exporter, limit, buffer_size, order_by, group_by)
+            days = [day]
+        
+        for dt in days:
+            date_from, date_to = get_date_range(dt)
+            await load_and_push_for_day(date_from, date_to, connector, exporter, limit, buffer_size, order_by, group_by)
         Variable.set(state_key, "1")
 
     asyncio.run(fetch_and_push_galaksion_data())

@@ -71,9 +71,10 @@ def download_and_export_nocodb_involve_data(**context):
         all_data = []
         page = 1
         limit = 100
+        df_filters = {'preferred_currency': 'USD'}
         if not downloaded_once:
             while True:
-                data, has_next = await connector.get_conversion(page=str(page), limit=str(limit))
+                data, has_next = await connector.get_conversion(page=str(page), limit=str(limit), filters=df_filters)
                 all_data.extend(data)
                 if not has_next:
                     break
@@ -83,7 +84,7 @@ def download_and_export_nocodb_involve_data(**context):
             execution_date = context['execution_date']
             day = execution_date.strftime("%Y-%m-%d")
             while True:
-                data, has_next = await connector.get_conversion(start_date=day, end_date=day, page=str(page), limit=str(limit))
+                data, has_next = await connector.get_conversion(start_date=day, end_date=day, page=str(page), limit=str(limit), filters=df_filters)
                 all_data.extend(data)
                 if not has_next:
                     break

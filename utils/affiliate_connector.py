@@ -86,12 +86,14 @@ class InvolveAsyncConnector(AsyncConnector):
         data = {"start_date": start_date, "end_date": end_date, "page": page, "limit": limit}
         for key, value in filters.items():
             data[f"filters[{key}]"] = value
+            print('data')
         return await self._fetch_conversion(self._range_conversion_url, data)
 
     async def _get_all_conversion(self, page="1", limit="100", **filters):
         data = {"page": page, "limit": limit}
         for key, value in filters.items():
             data[f"filters[{key}]"] = value
+            print('data')
         return await self._fetch_conversion(self._all_conversion_url, data)
 
 

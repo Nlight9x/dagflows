@@ -65,13 +65,13 @@ def download_and_export_nocodb_involve_data(**context):
 
     downloaded_once = Variable.get(state_key, default_var="0") == "1"
 
-    async def fetch_data_for_day(day_str, connector):
+    async def fetch_data_for_range(start_date, end_date, connector):
         all_data = []
         page = 1
         limit = 100
         df_filters = {'preferred_currency': 'USD'}
         while True:
-            data, has_next = await connector.get_conversion(start_date=day_str, end_date=day_str, page=str(page), limit=str(limit), **df_filters)
+            data, has_next = await connector.get_conversion(start_date=start_date, end_date=end_date, page=str(page), limit=str(limit), **df_filters)
             all_data.extend(data)
             if not has_next:
                 break
@@ -86,19 +86,16 @@ def download_and_export_nocodb_involve_data(**context):
         execution_date = context.get('execution_date') if 'execution_date' in context else None
         
         if not downloaded_once:
-            # Lần đầu: lấy dữ liệu 2 tuần từ ngày DAG chạy
-            start_day = execution_date if execution_date else datetime.now()
-            days = [start_day - timedelta(days=i) for i in range(14)]
-            for dt in days:
-                day_str = dt.strftime("%Y-%m-%d")
-                day_data = await fetch_data_for_day(day_str, connector)
-                all_data.extend(day_data)
+            # Lần đầu: lấy dữ liệu 14 ngày trong 1 lần gọi API
+            end_date = (execution_date if execution_date else datetime.now()).strftime("%Y-%m-%d")
+            start_date = (execution_date if execution_date else datetime.now() - timedelta(days=13)).strftime("%Y-%m-%d")
+            all_data = await fetch_data_for_range(start_date, end_date, connector)
             Variable.set(state_key, "1")
         else:
             # Các lần sau: lấy ngày theo execution_date
             day = execution_date if execution_date else datetime.now()
             day_str = day.strftime("%Y-%m-%d")
-            all_data = await fetch_data_for_day(day_str, connector)
+            all_data = await fetch_data_for_range(day_str, day_str, connector)
         return all_data
 
     all_data = asyncio.run(fetch_all_data())

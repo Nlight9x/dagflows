@@ -86,10 +86,16 @@ def download_and_export_nocodb_involve_data(**context):
         execution_date = context.get('execution_date') if 'execution_date' in context else None
         
         if not downloaded_once:
-            # Lần đầu: lấy dữ liệu 14 ngày trong 1 lần gọi API
-            end_date = (execution_date if execution_date else datetime.now()).strftime("%Y-%m-%d")
-            start_date = (execution_date if execution_date else datetime.now() - timedelta(days=13)).strftime("%Y-%m-%d")
-            all_data = await fetch_data_for_range(start_date, end_date, connector)
+            # Lần đầu: lấy toàn bộ dữ liệu lịch sử
+            page = 1
+            limit = 100
+            df_filters = {'preferred_currency': 'USD'}
+            while True:
+                data, has_next = await connector.get_conversion(page=str(page), limit=str(limit), **df_filters)
+                all_data.extend(data)
+                if not has_next:
+                    break
+                page += 1
             Variable.set(state_key, "1")
         else:
             # Các lần sau: lấy ngày theo execution_date

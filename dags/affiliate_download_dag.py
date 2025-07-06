@@ -179,7 +179,7 @@ def download_and_export_nocodb_galaksion_data(**context):
         accumulated_money = 0.0
         total_money = None
         total_data = None  # Lưu toàn bộ thông tin total
-        percent_threshold = float(Variable.get('galaksion_money_percent_threshold', default_var='0.7'))
+        percent_threshold = float(Variable.get('galaksion_money_percent_threshold', default_var='1.0'))
 
         def has_money_gt_zero(records):
             if not records:

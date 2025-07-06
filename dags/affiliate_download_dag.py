@@ -139,7 +139,41 @@ def download_and_export_nocodb_galaksion_data(**context):
             transformed_data.append(new_item)
         return transformed_data
 
-    async def load_and_push_for_day(date_from, date_to, connector, exporter, limit, buffer_size, order_by, group_by):
+    async def get_hoath_campaign_ids(connector, date_from, date_to):
+        """Bước 1: Lấy campaign_id của những campaign có 'hoath' trong tên"""
+        campaign_ids = []
+        offset = 0
+        limit = 100
+        order_by = {"field": "money", "direction": "desc"}
+        group_by = ["campaign"]  # Chỉ group by campaign
+        
+        while True:
+            try:
+                response, has_next = await connector.get_reports(
+                    date_from=date_from, date_to=date_to, limit=limit, offset=offset, order_by=order_by, group_by=group_by
+                )
+                
+                rows = response.get('rows', [])
+                for row in rows:
+                    campaign_name = row.get('campaign', '')
+                    if 'hoath' in campaign_name.lower():
+                        # Tách campaign_id từ campaign name (format: "123 Campaign Name")
+                        parts = campaign_name.strip().split(' ', 1)
+                        if parts and parts[0].isdigit():
+                            campaign_ids.append(parts[0])
+                
+                if not has_next:
+                    break
+                offset += limit
+                
+            except Exception as e:
+                print(f"Error getting hoath campaigns: {e}")
+                break
+        
+        print(f"Found {len(campaign_ids)} campaigns with 'hoath': {campaign_ids}")
+        return campaign_ids
+
+    async def load_and_push_for_day(date_from, date_to, connector, exporter, limit, buffer_size, order_by, group_by, campaign_ids=None):
         offset = 0
         buffer = []
         accumulated_money = 0.0
@@ -161,9 +195,19 @@ def download_and_export_nocodb_galaksion_data(**context):
             nonlocal offset
             for attempt in range(retry_count):
                 try:
-                    response, has_next = await connector.get_reports(
-                        date_from=date_from, date_to=date_to, limit=limit, offset=offset, order_by=order_by, group_by=group_by
-                    )
+                    # Bước 2: Thêm filter campaigns nếu có
+                    params = {
+                        'date_from': date_from, 
+                        'date_to': date_to, 
+                        'limit': limit, 
+                        'offset': offset, 
+                        'order_by': order_by, 
+                        'group_by': group_by
+                    }
+                    if campaign_ids:
+                        params['campaigns'] = campaign_ids
+                    
+                    response, has_next = await connector.get_reports(**params)
                     await asyncio.sleep(delay_seconds)
                     return response, has_next
                 except httpx.HTTPStatusError as e:
@@ -220,6 +264,7 @@ def download_and_export_nocodb_galaksion_data(**context):
         def get_date_range(dt):
             day_str = dt.strftime("%Y-%m-%d")
             return f"{day_str} 00:00:00", f"{day_str} 23:59:59"
+        
         execution_date = context.get('execution_date') if 'execution_date' in context else None
         if not downloaded_once:
             start_day = execution_date if execution_date else datetime.now()
@@ -230,7 +275,10 @@ def download_and_export_nocodb_galaksion_data(**context):
         
         for dt in days:
             date_from, date_to = get_date_range(dt)
-            await load_and_push_for_day(date_from, date_to, connector, exporter, limit, buffer_size, order_by, group_by)
+            # Bước 1: Lấy campaign_ids có 'hoath' cho đúng ngày này
+            campaign_ids = await get_hoath_campaign_ids(connector, date_from, date_to)
+            # Bước 2: Lấy dữ liệu với campaign_ids vừa tìm được
+            await load_and_push_for_day(date_from, date_to, connector, exporter, limit, buffer_size, order_by, group_by, campaign_ids)
         Variable.set(state_key, "1")
 
     asyncio.run(fetch_and_push_galaksion_data())

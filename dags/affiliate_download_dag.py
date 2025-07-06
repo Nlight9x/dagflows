@@ -160,7 +160,7 @@ def download_and_export_nocodb_galaksion_data(**context):
                         # Tách campaign_id từ campaign name (format: "123 Campaign Name")
                         parts = campaign_name.strip().split(' ', 1)
                         if parts and parts[0].isdigit():
-                            campaign_ids.append(parts[0])
+                            campaign_ids.append(int(parts[0]))
                 
                 if not has_next:
                     break

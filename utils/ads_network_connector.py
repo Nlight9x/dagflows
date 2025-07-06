@@ -51,7 +51,7 @@ class GalaksionAsyncConnector(AdsNetworkAsyncConnector):
                 return self._token
             return None
 
-    async def get_reports(self, date_from, date_to, group_by=None, order_by=None, limit=100, offset=0):
+    async def get_reports(self, date_from, date_to, group_by=None, order_by=None, limit=100, offset=0, campaigns=None):
         if not self._token:
             raise ValueError("Not authenticated. Please call authenticate() first")
 
@@ -68,6 +68,8 @@ class GalaksionAsyncConnector(AdsNetworkAsyncConnector):
             params["groupBy"] = json.dumps(group_by)
         if order_by:
             params["orderBy"] = json.dumps(order_by)
+        if campaigns:
+            params["campaigns"] = json.dumps(campaigns)
 
         # Prepare headers with auth token
         headers = {

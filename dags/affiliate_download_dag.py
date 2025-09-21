@@ -278,7 +278,8 @@ def download_and_export_nocodb_galaksion_data(**context):
             # Bước 1: Lấy campaign_ids có 'hoath' cho đúng ngày này
             campaign_ids = await get_hoath_campaign_ids(connector, date_from, date_to)
             # Bước 2: Lấy dữ liệu với campaign_ids vừa tìm được
-            await load_and_push_for_day(date_from, date_to, connector, exporter, limit, buffer_size, order_by, group_by, campaign_ids)
+            if len(campaign_ids) > 0:
+                await load_and_push_for_day(date_from, date_to, connector, exporter, limit, buffer_size, order_by, group_by, campaign_ids)
         Variable.set(state_key, "1")
 
     asyncio.run(fetch_and_push_galaksion_data())

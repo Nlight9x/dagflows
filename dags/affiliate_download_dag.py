@@ -8,8 +8,8 @@ import json
 import httpx
 import pendulum
 
-from utils.affiliate_connector import InvolveAsyncConnector
-from utils.storage_exporter import CsvExporter, NocodbExporter
+from utils.affiliate_connector import InvolveAsyncConnector, TripComAsyncConnector
+from utils.storage_exporter import CsvExporter, NocodbExporter, PostgresSQLExporter
 from utils.ads_network_connector import GalaksionAsyncConnector
 
 # Chỉ dùng cho dữ liệu Galaksion
@@ -285,6 +285,65 @@ def download_and_export_nocodb_galaksion_data(**context):
     asyncio.run(fetch_and_push_galaksion_data())
 
 
+def download_and_export_postgres_tripcom_data(**context):
+    """Download Trip.com conversion data and export to PostgreSQL"""
+    # Get Trip.com cookies from Airflow Variable
+    tripcom_cookies = Variable.get("tripcom_cookies")
+    
+    # Get PostgreSQL connection info from Airflow Variable
+    postgres_config = Variable.get("postgres_db_connection_info")
+    postgres_config = json.loads(postgres_config)
+    
+    # Get table name from Variable
+    table_name = Variable.get("tripcom_table_name", default_var="Tripcom Conversions")
+    column_mapping = Variable.get("tripcom_column_mapping", default_var=None)
+    select_columns = Variable.get("tripcom_select_columns", default_var=None)
+
+    async def fetch_tripcom_data():
+        """Fetch 3 months of data from Trip.com"""
+        connector = TripComAsyncConnector(cookies=tripcom_cookies)
+        await connector.authenticate()
+        
+        # Calculate date range: 3 months from current date
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=90)  # Approximately 3 months
+        
+        start_date_str = start_date.strftime("%Y-%m-%d")
+        end_date_str = end_date.strftime("%Y-%m-%d")
+        
+        print(f"Fetching Trip.com data from {start_date_str} to {end_date_str}")
+        
+        try:
+            data, has_next = await connector.get_conversion(start_date=start_date_str, end_date=end_date_str)
+            print(f"Fetched {len(data)} records from Trip.com")
+            return data
+        except Exception as e:
+            print(f"Error fetching Trip.com data: {e}")
+            raise
+
+    def export_to_postgres(data):
+        """Export data to PostgreSQL using PostgresSQLExporter"""
+        if not data:
+            print("No data to export")
+            return
+            
+        # Initialize PostgreSQL exporter
+        exporter = PostgresSQLExporter(table_name=table_name, **postgres_config )
+        
+        # Export with merge on orderId
+        result = exporter.export(data=data,
+                                 column_mapping=json.loads(column_mapping) if column_mapping is not None else None,
+                                 columns=json.loads(column_mapping) if column_mapping is not None else None,
+                                 merge_key_columns=['orderId'], batch_size=1000, retry_count=3, retry_delay=5)
+        
+        print(f"Exported {result['exported_records']} records to PostgreSQL table '{table_name}'")
+        return result
+    
+    # Execute the workflow
+    all_data = asyncio.run(fetch_tripcom_data())
+    export_to_postgres(all_data)
+
+
 local_tz = pendulum.timezone("Asia/Ho_Chi_Minh")
 with DAG(
     dag_display_name="[ADS] - Download report data",
@@ -308,4 +367,13 @@ with DAG(
         task_id="get_and_save_galaksion_data_to_nocodb",
         python_callable=download_and_export_nocodb_galaksion_data,
         provide_context=True,
+    )
+
+    export_to_postgres_tripcom_task = PythonOperator(
+        task_display_name="Download Trip.com conversions to PostgreSQL",
+        task_id="get_and_save_tripcom_data_to_postgres",
+        python_callable=download_and_export_postgres_tripcom_data,
+        provide_context=True,
+        retries=3,
+        retry_delay=timedelta(minutes=2),
     )

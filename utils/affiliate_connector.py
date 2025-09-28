@@ -97,6 +97,56 @@ class InvolveAsyncConnector(AsyncConnector):
         return await self._fetch_conversion(self._all_conversion_url, data)
 
 
+class TripComAsyncConnector(AsyncConnector):
+
+    _get_conversion_url = 'https://www.trip.com/restapi/soa2/18073/json/reportAllianceOrder'
+
+    def __init__(self, **config):
+        super().__init__(**config)
+        self._cookies = config.get('cookies')
+
+        self._df_aid = config.get('df_aid', 5534971)
+        self._df_data_type = config.get('df_data_type', 'B')
+
+    async def authenticate(self):
+        pass
+
+    async def get_conversion(self, **params):
+        retry = 0
+        while retry < 3:
+            try:
+                print("Do it here!")
+                if not self._cookies:
+                    raise ValueError("Not authenticated. Please call authenticate() first.")
+                headers = {
+                    "Cookie": self._cookies
+                }
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    rq_body = {
+                        "aid": params.get('aid', self._df_aid), "dataType": params.get('data_type', self._df_data_type),
+                        "beginDate": params.get("start_date"), "endDate": params.get("end_date"), **params
+                    }
+                    response = await client.post(self._get_conversion_url, headers=headers, data=rq_body)
+                    if response.status_code == 200:
+                        res_body = response.json()
+                        if res_body.get('ResponseStatus').get('Ack') == "Success":
+                            # nextPage logic
+                            has_next_page = False
+                            return res_body.get('allianceOrderList') or [], has_next_page
+                        else:
+                            raise Exception(f"API error: {res_body}")
+                    else:
+                        raise Exception(f"HTTP error: {response.status_code} - {response.text}")
+            except Exception as e:
+                retry += 1
+                if retry < 3:
+                    print(f"Retrying connection to Trip.com, attempt {retry + 1}/3...")
+                    await asyncio.sleep(20)
+                else:
+                    print(f"Trip.com connection failed after 3 attempts: {e}")
+                    raise
+        return None, False
+
 # async def test():
 #     x = InvolveAsyncConnector(secret_key="H/hyZnEQyqoInz+gXdV6G6fwMCOuGyoxTnTLZYUCxys=")
 #     await x.authenticate()

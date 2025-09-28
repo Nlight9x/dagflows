@@ -369,6 +369,15 @@ with DAG(
         provide_context=True,
     )
 
+
+with DAG(
+    dag_display_name="[ADS] - Download report data 2",
+    dag_id="ads_download_report_data_2",
+    start_date=datetime(2025, 1, 1, tzinfo=local_tz),
+    schedule_interval="0 10 * * *",
+    catchup=False,
+    tags=["affiliate"],
+) as dag_2:
     export_to_postgres_tripcom_task = PythonOperator(
         task_display_name="Download Trip.com conversions to PostgreSQL",
         task_id="get_and_save_tripcom_data_to_postgres",

@@ -155,6 +155,7 @@ class PostgresDriver:
                 INSERT INTO {table_name} ({columns_str}) 
                 VALUES ({placeholders})
             """
+        print(insert_query)
         
         # Prepare data
         values_list = []

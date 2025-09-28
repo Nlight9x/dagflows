@@ -333,7 +333,7 @@ def download_and_export_postgres_tripcom_data(**context):
         # Export with merge on orderId
         result = exporter.export(data=data,
                                  column_mapping=json.loads(column_mapping) if column_mapping is not None else None,
-                                 columns=json.loads(column_mapping) if column_mapping is not None else None,
+                                 columns=json.loads(select_columns) if select_columns is not None else None,
                                  merge_key_columns=['orderId'], batch_size=1000, retry_count=3, retry_delay=5)
         
         print(f"Exported {result['exported_records']} records to PostgreSQL table '{table_name}'")

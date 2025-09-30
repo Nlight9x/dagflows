@@ -115,7 +115,6 @@ class TripComAsyncConnector(AsyncConnector):
         retry = 0
         while retry < 3:
             try:
-                print("Do it here!")
                 if not self._cookies:
                     raise ValueError("Not authenticated. Please call authenticate() first.")
                 headers = {

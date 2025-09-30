@@ -159,8 +159,6 @@ class PostgresDriver:
                 INSERT INTO "{table_name}" ({target_cols_str}) 
                 VALUES %s
             """
-        print(insert_query)
-        
         # Prepare data
         batch = []
         for record in data:
@@ -173,7 +171,7 @@ class PostgresDriver:
                 execute_values(cursor, insert_query, batch)
                 conn.commit()
         return len(batch)
-    
+
     def merge(self, data, table_name, keys=None, keys_mode="include", merge_keys=None, column_mapping=None):
         """Merge data using PostgreSQL MERGE syntax (PostgreSQL 15+)"""
         if not data:
@@ -270,7 +268,6 @@ class PostgresSQLExporter(StorageExporter):
         if len(data) == 0:
             return
                 
-        batch_size = settings.get('batch_size', 1000)
         column_mapping = settings.get('column_mapping', {})
         
         keys = settings.get('keys')
@@ -302,9 +299,9 @@ class PostgresSQLExporter(StorageExporter):
                     )
                     operation = "insert"
 
-                print(f"Successfully exported {total_processed} records to PostgreSQL table '{self._table_name}' using {operation}")
-                if column_mapping:
-                    print(f"Column mapping applied: {column_mapping}")
+                # print(f"Successfully exported {total_processed} records to PostgreSQL table '{self._table_name}' using {operation}")
+                # if column_mapping:
+                #     print(f"Column mapping applied: {column_mapping}")
                 
                 return {
                     "exported_records": total_processed, 

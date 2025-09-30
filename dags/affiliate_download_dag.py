@@ -297,7 +297,6 @@ def download_and_export_postgres_tripcom_data(**context):
     # Get table name from Variable
     table_name = Variable.get("tripcom_table_name", default_var="Tripcom Conversions")
     
-    select_columns = Variable.get("tripcom_select_columns", default_var=None)
     keys = Variable.get("tripcom_keys", default_var=None)
     keys_mode = Variable.get("tripcom_keys_mode", default_var="include")
     conflict_keys = Variable.get("tripcom_conflict_keys", default_var='["orderId"]')
@@ -335,8 +334,7 @@ def download_and_export_postgres_tripcom_data(**context):
                 )
                 
                 if data:
-                    print(f"Page {page}: Fetched {len(data)} records from Trip.com")
-                    
+                    # print(f"Page {page}: Fetched {len(data)} records from Trip.com")
                     # Export this page immediately to PostgreSQL
                     result = exporter.export(
                         data=data,
@@ -350,7 +348,7 @@ def download_and_export_postgres_tripcom_data(**context):
                     )
                     
                     total_exported += result['exported_records']
-                    print(f"Page {page}: Exported {result['exported_records']} records to PostgreSQL")
+                    # print(f"Page {page}: Exported {result['exported_records']} records to PostgreSQL")
                 
                 if not has_next:
                     break
@@ -393,17 +391,8 @@ with DAG(
         provide_context=True,
     )
 
-
-with DAG(
-    dag_display_name="[ADS] - Download report data 2",
-    dag_id="ads_download_report_data_2",
-    start_date=datetime(2025, 1, 1, tzinfo=local_tz),
-    schedule_interval="0 10 * * *",
-    catchup=False,
-    tags=["affiliate"],
-) as dag_2:
     export_to_postgres_tripcom_task = PythonOperator(
-        task_display_name="Download Trip.com conversions to PostgreSQL",
+        task_display_name="Download Trip.com conversions",
         task_id="get_and_save_tripcom_data_to_postgres",
         python_callable=download_and_export_postgres_tripcom_data,
         provide_context=True,

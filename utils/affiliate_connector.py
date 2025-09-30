@@ -99,7 +99,7 @@ class InvolveAsyncConnector(AsyncConnector):
 
 class TripComAsyncConnector(AsyncConnector):
 
-    _get_conversion_url = 'https://www.trip.com/restapi/soa2/18073/json/reportAllianceOrder'
+    _get_conversion_url = 'https://www.trip.com/restapi/soa2/18073/json/getAllianceOrderDetail'
 
     def __init__(self, **config):
         super().__init__(**config)
@@ -122,16 +122,19 @@ class TripComAsyncConnector(AsyncConnector):
                     "Cookie": self._cookies
                 }
                 async with httpx.AsyncClient(timeout=30.0) as client:
+                    page = int(params.get('page', '1'))
+                    page_size = int(params.get('page_size', '10'))
                     rq_body = {
                         "aid": params.get('aid', self._df_aid), "dataType": params.get('data_type', self._df_data_type),
+                        "pageIndex": page, "pageSize": page_size,
                         "beginDate": params.get("start_date"), "endDate": params.get("end_date"), **params
                     }
                     response = await client.post(self._get_conversion_url, headers=headers, data=rq_body)
                     if response.status_code == 200:
                         res_body = response.json()
                         if res_body.get('ResponseStatus').get('Ack') == "Success":
-                            # nextPage logic
-                            has_next_page = False
+                            order_count = res_body.get('orderCount', 0)
+                            has_next_page = (page * page_size) < order_count
                             return res_body.get('allianceOrderList') or [], has_next_page
                         else:
                             raise Exception(f"API error: {res_body}")

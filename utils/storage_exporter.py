@@ -122,57 +122,125 @@ class PostgresDriver:
                 conn.commit()
                 return cursor.rowcount
     
-    def batch_insert(self, data, table_name, column_mapping=None, columns=None, merge_key_columns=None, batch_size=1000):
+    def batch_insert(self, data, table_name, keys=None, keys_mode="include", primary_keys=None, column_mapping=None):
        
-        if not data and len(data) <= 0:
+        if not data or len(data) <= 0:
             return 0
-        
-        # Get columns from data if not provided
-        if not columns:
-            columns = list(data[0].keys())
-        
-        # Resolve target columns using mapping (without mutating data) 
-        column_mapping = column_mapping or {}
-        target_columns = [column_mapping.get(fd, fd) for fd in columns]
 
-        columns_str = ', '.join(target_columns)
-        placeholders = ', '.join(['%s'] * len(columns))
+        if keys is None:
+            target_keys = list(data[0].keys())
+        else:
+            if keys_mode not in ("include", "exclude"):
+                raise ValueError("keys_mode must be 'include' or 'exclude'")
+            if keys_mode == "include":
+                target_keys = [k for k in keys if k in data[0].keys()]
+            else:
+                target_keys = [k for k in data[0].keys() if k not in keys]
+        target_cols = [column_mapping.get(tk, tk) for tk in target_keys] if column_mapping else target_keys
+
+        target_cols_str = '"' + '", "'.join(target_cols) + '"'
         
         # Build query
-        if merge_key_columns and len(merge_key_columns) > 0:
+        if primary_keys and len(primary_keys) > 0:
+            primary_cols = [column_mapping.get(pk, pk) for pk in primary_keys]
             # UPSERT path
-            update_columns = [col for col in target_columns if col not in merge_key_columns]
-            update_clause = ', '.join([f"{col} = EXCLUDED.{col}" for col in update_columns])
+            update_cols = [col for col in target_cols if col not in primary_cols]
+            update_clause = ', '.join([f"\"{col}\" = EXCLUDED.\"{col}\"" for col in update_cols])
+            primary_cols_str = '"' + '", "'.join(primary_cols) + '"'
             insert_query = f"""
-                INSERT INTO {table_name} ({columns_str}) 
-                VALUES ({placeholders})
-                ON CONFLICT ({', '.join(merge_key_columns)}) 
+                INSERT INTO {table_name} ({target_cols_str}) 
+                VALUES %s
+                ON CONFLICT ({primary_cols_str}) 
                 DO UPDATE SET {update_clause}
             """
         else:
             # Plain INSERT path
             insert_query = f"""
-                INSERT INTO {table_name} ({columns_str}) 
-                VALUES ({placeholders})
+                INSERT INTO {table_name} ({target_cols_str}) 
+                VALUES %s
             """
         print(insert_query)
         
         # Prepare data
-        values_list = []
+        batch = []
         for record in data:
-            values = [record.get(col) for col in columns]
-            values_list.append(values)
+            values = [record.get(k) for k in target_keys]
+            batch.append(values)
         
         # Insert in batches
-        total_inserted = 0
         with self.get_connection() as conn:
             with conn.cursor() as cursor:
-                for i in range(0, len(values_list), batch_size):
-                    batch = values_list[i:i+batch_size]
-                    execute_values( cursor, insert_query, batch, template=None, page_size=batch_size )
-                    total_inserted += len(batch)
+                execute_values(cursor, insert_query, batch)
                 conn.commit()
-        return total_inserted
+        return len(batch)
+    
+    def merge(self, data, table_name, keys=None, keys_mode="include", merge_keys=None, column_mapping=None):
+        """Merge data using PostgreSQL MERGE syntax (PostgreSQL 15+)"""
+        if not data:
+            return 0
+        if not merge_keys or len(merge_keys) == 0:
+            raise ValueError("merge_keys must be provided for MERGE operation")
+        
+        # Determine source columns
+        if keys is None:
+            source_columns = list(data[0].keys())
+        else:
+            if keys_mode not in ("include", "exclude"):
+                raise ValueError("keys_mode must be 'include' or 'exclude'")
+            if keys_mode == "include":
+                source_columns = [c for c in keys if c in data[0].keys()]
+            else:
+                source_columns = [c for c in data[0].keys() if c not in keys]
+        
+        if not source_columns:
+            raise ValueError("No columns to merge after applying keys filter")
+        
+        # Resolve target columns using mapping (without mutating data) 
+        column_mapping = column_mapping or {}
+        target_columns = [column_mapping.get(fd, fd) for fd in source_columns]
+        # Map merge_keys (from data keys) to target DB columns
+        mapped_merge_keys = [column_mapping.get(k, k) for k in merge_keys]
+        # Validate all merge keys are present in target columns
+        missing_merge_cols = [k for k in mapped_merge_keys if k not in target_columns]
+        if missing_merge_cols:
+            raise ValueError(f"merge_keys not present in target columns: {missing_merge_cols}")
+        
+        # Prepare data
+        values_list = []
+        for record in data:
+            values = [record.get(col) for col in source_columns]
+            values_list.append(values)
+        
+        # Build MERGE query
+        columns_str = ', '.join([f'"{c}"' for c in target_columns])
+        
+        # Build WHEN MATCHED clause (update non-key columns)
+        update_columns = [col for col in target_columns if col not in mapped_merge_keys]
+        update_clause = ', '.join([f'"{col}" = source."{col}"' for col in update_columns])
+        
+        # Build WHEN NOT MATCHED clause (insert all columns)
+        insert_columns = ', '.join([f'"{c}"' for c in target_columns])
+        insert_values = ', '.join([f'source."{col}"' for col in target_columns])
+        
+        merge_query = f"""
+            MERGE INTO {table_name} AS target
+            USING (VALUES %s) AS source ({columns_str})
+            ON ({', '.join([f'target."{col}" = source."{col}"' for col in mapped_merge_keys])})
+            WHEN MATCHED THEN
+                UPDATE SET {update_clause}
+            WHEN NOT MATCHED THEN
+                INSERT ({insert_columns}) VALUES ({insert_values})
+        """
+        
+        print(f"MERGE Query: {merge_query}")
+        
+        # Execute merge
+        with self.get_connection() as conn:
+            with conn.cursor() as cursor:
+                execute_values(cursor, merge_query, values_list)
+                conn.commit()
+        
+        return len(values_list)
     
     def delete(self, table_name, where_clause, params=None):
         """Delete records based on WHERE clause"""
@@ -201,23 +269,40 @@ class PostgresSQLExporter(StorageExporter):
             raise ValueError("Data must be a list of dicts")
         if len(data) == 0:
             return
-        
+                
         batch_size = settings.get('batch_size', 1000)
-        
         column_mapping = settings.get('column_mapping', {})
-        merge_key_columns = settings.get('merge_key_columns')
-        columns = settings.get('columns')
+        
+        keys = settings.get('keys')
+        keys_mode = settings.get('keys_mode', 'include')
+        conflict_keys = settings.get('conflict_keys')  # Keys để xác định trùng dữ liệu
+        operation_type = settings.get('operation_type', 'insert')  # 'insert', 'upsert', 'merge'
 
         # Column mapping is applied in PostgresDriver to avoid mutating input data
         
         # Execute operation with retry logic
         for attempt in range(self._retry_count):
             try:
-                total_processed = self._driver.batch_insert(
-                    data, self._table_name, column_mapping=column_mapping,
-                    columns=columns, merge_key_columns=merge_key_columns, batch_size=batch_size)
+                if operation_type == 'merge' and conflict_keys:
+                    # Use MERGE syntax for upsert
+                    total_processed = self._driver.merge(
+                        data, self._table_name,  keys=keys, keys_mode=keys_mode, merge_keys=conflict_keys, column_mapping=column_mapping
+                    )
+                    operation = "merge"
+                elif operation_type == 'upsert' and conflict_keys:
+                    # Use batch_insert with ON CONFLICT for upsert
+                    total_processed = self._driver.batch_insert(
+                        data, self._table_name, keys=keys, keys_mode=keys_mode, primary_keys=conflict_keys, column_mapping=column_mapping
+                    )
+                    operation = "upsert"
+                else:
+                    # Use batch_insert for plain insert
+                    total_processed = self._driver.batch_insert(
+                        data, self._table_name,  keys=keys, keys_mode=keys_mode, column_mapping=column_mapping
+                    )
+                    operation = "insert"
 
-                print(f"Successfully exported {total_processed} records to PostgreSQL table '{self._table_name}'")
+                print(f"Successfully exported {total_processed} records to PostgreSQL table '{self._table_name}' using {operation}")
                 if column_mapping:
                     print(f"Column mapping applied: {column_mapping}")
                 
@@ -225,7 +310,7 @@ class PostgresSQLExporter(StorageExporter):
                     "exported_records": total_processed, 
                     "table": self._table_name, 
                     "column_mapping": column_mapping,
-                    "operation": "upsert" if merge_key_columns and len(merge_key_columns) > 0 else "insert"
+                    "operation": operation
                 }
                 
             except Exception as e:

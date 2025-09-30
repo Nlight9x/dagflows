@@ -296,11 +296,16 @@ def download_and_export_postgres_tripcom_data(**context):
     
     # Get table name from Variable
     table_name = Variable.get("tripcom_table_name", default_var="Tripcom Conversions")
-    column_mapping = Variable.get("tripcom_column_mapping", default_var=None)
+    
     select_columns = Variable.get("tripcom_select_columns", default_var=None)
+    keys = Variable.get("tripcom_keys", default_var=None)
+    keys_mode = Variable.get("tripcom_keys_mode", default_var="include")
+    conflict_keys = Variable.get("tripcom_conflict_keys", default_var=None)
+    operation_type = Variable.get("tripcom_operation_type", default_var="upsert")
+    column_mapping = Variable.get("tripcom_column_mapping", default_var=None)
 
-    async def fetch_tripcom_data():
-        """Fetch 3 months of data from Trip.com"""
+    async def fetch_and_export_tripcom_data():
+        """Fetch Trip.com data page by page and export to PostgreSQL immediately"""
         connector = TripComAsyncConnector(cookies=tripcom_cookies)
         await connector.authenticate()
         
@@ -313,35 +318,54 @@ def download_and_export_postgres_tripcom_data(**context):
         
         print(f"Fetching Trip.com data from {start_date_str} to {end_date_str}")
         
+        # Initialize PostgreSQL exporter
+        exporter = PostgresSQLExporter(table_name=table_name, **postgres_config)
+        
+        page = 1
+        page_size = 100
+        total_exported = 0
+        
         try:
-            data, has_next = await connector.get_conversion(start_date=start_date_str, end_date=end_date_str)
-            print(f"Fetched {len(data)} records from Trip.com")
-            return data
+            while True:
+                data, has_next = await connector.get_conversion(
+                    start_date=start_date_str, 
+                    end_date=end_date_str,
+                    page=page,
+                    page_size=page_size
+                )
+                
+                if data:
+                    print(f"Page {page}: Fetched {len(data)} records from Trip.com")
+                    
+                    # Export this page immediately to PostgreSQL
+                    result = exporter.export(
+                        data=data,
+                        column_mapping=json.loads(column_mapping) if column_mapping is not None else None,
+                        keys=json.loads(keys) if keys is not None else None,
+                        keys_mode=keys_mode,
+                        conflict_keys=json.loads(conflict_keys) if conflict_keys is not None else None,
+                        operation_type=operation_type,
+                        retry_count=3,
+                        retry_delay=5
+                    )
+                    
+                    total_exported += result['exported_records']
+                    print(f"Page {page}: Exported {result['exported_records']} records to PostgreSQL")
+                
+                if not has_next:
+                    break
+                    
+                page += 1
+                
         except Exception as e:
             print(f"Error fetching Trip.com data: {e}")
             raise
-
-    def export_to_postgres(data):
-        """Export data to PostgreSQL using PostgresSQLExporter"""
-        if not data:
-            print("No data to export")
-            return
             
-        # Initialize PostgreSQL exporter
-        exporter = PostgresSQLExporter(table_name=table_name, **postgres_config )
-        
-        # Export with merge on orderId
-        result = exporter.export(data=data,
-                                 column_mapping=json.loads(column_mapping) if column_mapping is not None else None,
-                                 columns=json.loads(select_columns) if select_columns is not None else None,
-                                 merge_key_columns=['Booking Id'], batch_size=1000, retry_count=3, retry_delay=5)
-        
-        print(f"Exported {result['exported_records']} records to PostgreSQL table '{table_name}'")
-        return result
-    
+        print(f"Total exported: {total_exported} records to PostgreSQL table '{table_name}'")
+        return total_exported
+
     # Execute the workflow
-    all_data = asyncio.run(fetch_tripcom_data())
-    export_to_postgres(all_data)
+    asyncio.run(fetch_and_export_tripcom_data())
 
 
 local_tz = pendulum.timezone("Asia/Ho_Chi_Minh")

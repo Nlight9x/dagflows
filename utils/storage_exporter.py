@@ -148,7 +148,7 @@ class PostgresDriver:
             update_clause = ', '.join([f"\"{col}\" = EXCLUDED.\"{col}\"" for col in update_cols])
             primary_cols_str = '"' + '", "'.join(primary_cols) + '"'
             insert_query = f"""
-                INSERT INTO {table_name} ({target_cols_str}) 
+                INSERT INTO "{table_name}" ({target_cols_str}) 
                 VALUES %s
                 ON CONFLICT ({primary_cols_str}) 
                 DO UPDATE SET {update_clause}
@@ -156,7 +156,7 @@ class PostgresDriver:
         else:
             # Plain INSERT path
             insert_query = f"""
-                INSERT INTO {table_name} ({target_cols_str}) 
+                INSERT INTO "{table_name}" ({target_cols_str}) 
                 VALUES %s
             """
         print(insert_query)
@@ -223,7 +223,7 @@ class PostgresDriver:
         insert_values = ', '.join([f'source."{col}"' for col in target_columns])
         
         merge_query = f"""
-            MERGE INTO {table_name} AS target
+            MERGE INTO "{table_name}" AS target
             USING (VALUES %s) AS source ({columns_str})
             ON ({', '.join([f'target."{col}" = source."{col}"' for col in mapped_merge_keys])})
             WHEN MATCHED THEN

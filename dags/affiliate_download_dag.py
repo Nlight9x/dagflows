@@ -300,7 +300,7 @@ def download_and_export_postgres_tripcom_data(**context):
     select_columns = Variable.get("tripcom_select_columns", default_var=None)
     keys = Variable.get("tripcom_keys", default_var=None)
     keys_mode = Variable.get("tripcom_keys_mode", default_var="include")
-    conflict_keys = Variable.get("tripcom_conflict_keys", default_var='orderId')
+    conflict_keys = Variable.get("tripcom_conflict_keys", default_var='["orderId"]')
     operation_type = Variable.get("tripcom_operation_type", default_var="upsert")
     column_mapping = Variable.get("tripcom_column_mapping", default_var=None)
 

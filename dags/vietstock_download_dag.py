@@ -92,7 +92,7 @@ with DAG(
     tags=["vietstock", "manual"],
     params={
         "symbols": Param( default=["HPG", "VNM", "FPT"], type="array", description="List of stock symbols to download"),
-        "resolution": Param( default="1", type="string", description="Time resolution (1 for 1 day)" ),
+        "resolution": Param( default="1", type="string", description="Time resolution (1 for 1 minute, 60 for 1 hour, 1D for 1 day)" ),
         "from": Param( default="2024-01-01", type="string", format="date", description="Start date (YYYY-MM-DD)"),
         "to": Param( default="2025-05-31", type="string", format="date", description="End date (YYYY-MM-DD)" )
     }

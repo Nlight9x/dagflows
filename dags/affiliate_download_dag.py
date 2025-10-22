@@ -380,7 +380,7 @@ with DAG(
         task_display_name="Download InvolveAsia conversions",
         task_id="get_and_save_involve_data_to_nocodb",
         python_callable=download_and_export_nocodb_involve_data,
-        provide_context=True,
+        # provide_context=True,
         retries=3,
         retry_delay=timedelta(minutes=2),
     )
@@ -389,14 +389,14 @@ with DAG(
         task_display_name="Download Galaksion statistics",
         task_id="get_and_save_galaksion_data_to_nocodb",
         python_callable=download_and_export_nocodb_galaksion_data,
-        provide_context=True,
+        # provide_context=True,
     )
 
     export_to_postgres_tripcom_task = PythonOperator(
         task_display_name="Download Trip.com conversions",
         task_id="get_and_save_tripcom_data_to_postgres",
         python_callable=download_and_export_postgres_tripcom_data,
-        provide_context=True,
+        # provide_context=True,
         retries=3,
         retry_delay=timedelta(minutes=2),
     )

@@ -1,6 +1,7 @@
-from airflow import DAG
-from airflow.operators.python import PythonOperator
-from airflow.models import Variable
+from airflow.sdk import DAG
+from airflow.providers.standard.operators.python import PythonOperator
+from airflow.sdk import Variable
+from airflow.sdk import Param
 from datetime import datetime, timedelta
 import asyncio
 import os

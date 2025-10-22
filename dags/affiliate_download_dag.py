@@ -372,9 +372,9 @@ with DAG(
     dag_display_name="[ADS] - Download report data",
     dag_id="ads_download_report_data",
     start_date=datetime(2025, 1, 1, tzinfo=local_tz),
-    schedule_interval="0 10 * * *",
+    schedule="0 10 * * *",
     catchup=False,
-    tags=["affiliate"],
+    # tags=["affiliate"],
 ) as dag:
     export_to_nocodb_task = PythonOperator(
         task_display_name="Download InvolveAsia conversions",

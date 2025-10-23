@@ -1,7 +1,6 @@
 from airflow.sdk import DAG
 from airflow.providers.standard.operators.python import PythonOperator
 from airflow.sdk import Variable
-from airflow.sdk import Param
 from datetime import datetime, timedelta
 import asyncio
 import os
@@ -16,13 +15,14 @@ from utils.ads_network_connector import GalaksionAsyncConnector
 # Chỉ dùng cho dữ liệu Galaksion
 from datetime import datetime as dt
 
+
 def download_and_export_csv_affiliate_data(**context):
     secret_key = Variable.get("affiliate_secret_key")
     output_path = os.path.join(os.path.dirname(__file__), "../data/affiliate_data.csv")
     state_key = "affiliate_downloaded_once"
 
     # Kiểm tra trạng thái đã từng chạy chưa
-    downloaded_once = Variable.get(state_key, default_var="0") == "1"
+    downloaded_once = Variable.get(state_key, default="0") == "1"
 
     async def fetch_all_data():
         connector = InvolveAsyncConnector(secret_key=secret_key)
@@ -64,7 +64,7 @@ def download_and_export_nocodb_involve_data(**context):
     nocodb_token = Variable.get("nocodb_token")
     state_key = "involve_asia_downloaded_once"
 
-    downloaded_once = Variable.get(state_key, default_var="0") == "1"
+    downloaded_once = Variable.get(state_key, default="0") == "1"
 
     async def fetch_data_for_range(start_date, end_date, connector):
         all_data = []
@@ -119,7 +119,7 @@ def download_and_export_nocodb_galaksion_data(**context):
     nocodb_api_url = Variable.get("nocodb_galaksion_statistics_put_endpoint")
     nocodb_token = Variable.get("nocodb_token")
     state_key = "galaksion_downloaded_once"
-    downloaded_once = Variable.get(state_key, default_var="0") == "1"
+    downloaded_once = Variable.get(state_key, default="0") == "1"
 
     def transform_data(data):
         transformed_data = []
@@ -180,7 +180,7 @@ def download_and_export_nocodb_galaksion_data(**context):
         accumulated_money = 0.0
         total_money = None
         total_data = None  # Lưu toàn bộ thông tin total
-        percent_threshold = float(Variable.get('galaksion_money_percent_threshold', default_var='0.99'))
+        percent_threshold = float(Variable.get('galaksion_money_percent_threshold', default='0.99'))
 
         def has_money_gt_zero(records):
             if not records:
@@ -296,13 +296,13 @@ def download_and_export_postgres_tripcom_data(**context):
     postgres_config = json.loads(postgres_config)
     
     # Get table name from Variable
-    table_name = Variable.get("tripcom_table_name", default_var="Tripcom Conversions")
+    table_name = Variable.get("tripcom_table_name", default="Tripcom Conversions")
     
-    keys = Variable.get("tripcom_keys", default_var=None)
-    keys_mode = Variable.get("tripcom_keys_mode", default_var="include")
-    conflict_keys = Variable.get("tripcom_conflict_keys", default_var='["orderId"]')
-    operation_type = Variable.get("tripcom_operation_type", default_var="upsert")
-    column_mapping = Variable.get("tripcom_column_mapping", default_var=None)
+    keys = Variable.get("tripcom_keys", default=None)
+    keys_mode = Variable.get("tripcom_keys_mode", default="include")
+    conflict_keys = Variable.get("tripcom_conflict_keys", default='["orderId"]')
+    operation_type = Variable.get("tripcom_operation_type", default="upsert")
+    column_mapping = Variable.get("tripcom_column_mapping", default=None)
 
     async def fetch_and_export_tripcom_data():
         """Fetch Trip.com data page by page and export to PostgreSQL immediately"""

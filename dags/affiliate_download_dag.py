@@ -84,7 +84,7 @@ def download_and_export_nocodb_involve_data(**context):
         await connector.authenticate()
         all_data = []
         
-        execution_date = context.get('execution_date') if 'execution_date' in context else None
+        execution_date = context.get('logical_date') if 'logical_date' in context else None
         
         if not downloaded_once:
             # Lần đầu: lấy toàn bộ dữ liệu lịch sử
@@ -266,7 +266,7 @@ def download_and_export_nocodb_galaksion_data(**context):
             day_str = dt.strftime("%Y-%m-%d")
             return f"{day_str} 00:00:00", f"{day_str} 23:59:59"
         
-        execution_date = context.get('execution_date') if 'execution_date' in context else None
+        execution_date = context.get('logical_date') if 'logical_date' in context else None
         if not downloaded_once:
             start_day = execution_date if execution_date else datetime.now()
             days = [start_day - timedelta(days=i) for i in range(14)]

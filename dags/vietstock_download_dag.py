@@ -101,7 +101,6 @@ with DAG(
         task_display_name="Download Vietstock Data",
         task_id="download_vietstock_data",
         python_callable=download_vietstock_data,
-        provide=True,
         retries=3,
         retry_delay=timedelta(minutes=1),
     )

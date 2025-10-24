@@ -16,6 +16,10 @@ from utils.ads_network_connector import GalaksionAsyncConnector
 from datetime import datetime as dt
 
 
+def _get_data_date(**context):
+    logical_date = context.get('logical_date') if 'logical_date' in context else datetime.now()
+    return (logical_date - timedelta(days=1)).date()
+
 def download_and_export_csv_affiliate_data(**context):
     secret_key = Variable.get("affiliate_secret_key")
     output_path = os.path.join(os.path.dirname(__file__), "../data/affiliate_data.csv")
@@ -41,7 +45,7 @@ def download_and_export_csv_affiliate_data(**context):
             Variable.set(state_key, "1")
         else:
             # Các lần sau: lấy ngày theo execution_date
-            execution_date = context['execution_date']
+            execution_date = _get_data_date(**context)
             day = execution_date.strftime("%Y-%m-%d")
             while True:
                 data, has_next = await connector.get_conversion(start_date=day, end_date=day, page=str(page), limit=str(limit))
@@ -84,8 +88,8 @@ def download_and_export_nocodb_involve_data(**context):
         await connector.authenticate()
         all_data = []
         
-        execution_date = context.get('logical_date') if 'logical_date' in context else datetime.now()
-        print(f"Logical_date: {execution_date}")
+        execution_date = _get_data_date(**context)
+        print(f"Data date: {execution_date}")
         if not downloaded_once:
             # Lần đầu: lấy toàn bộ dữ liệu lịch sử
             page = 1
@@ -265,8 +269,8 @@ def download_and_export_nocodb_galaksion_data(**context):
             day_str = dt.strftime("%Y-%m-%d")
             return f"{day_str} 00:00:00", f"{day_str} 23:59:59"
         
-        execution_date = context.get('data_interval_start') if 'data_interval_start' in context else datetime.now()
-        print(f"Logical_date: {execution_date}")
+        execution_date = _get_data_date(**context)
+        print(f"Data date: {execution_date}")
         if not downloaded_once:
             days = [execution_date - timedelta(days=i) for i in range(14)]
         else:

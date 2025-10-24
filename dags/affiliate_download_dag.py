@@ -265,7 +265,7 @@ def download_and_export_nocodb_galaksion_data(**context):
             day_str = dt.strftime("%Y-%m-%d")
             return f"{day_str} 00:00:00", f"{day_str} 23:59:59"
         
-        execution_date = context.get('logical_date') if 'logical_date' in context else datetime.now()
+        execution_date = context.get('data_interval_start') if 'data_interval_start' in context else datetime.now()
         print(f"Logical_date: {execution_date}")
         if not downloaded_once:
             days = [execution_date - timedelta(days=i) for i in range(14)]

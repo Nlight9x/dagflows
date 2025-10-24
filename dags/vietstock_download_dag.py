@@ -34,7 +34,7 @@ def download_vietstock_data(**context):
     print(f"Date range: {from_date} to {to_date} (timestamp: {from_timestamp} to {to_timestamp})")
     
     # Create data directory if it doesn't exist
-    data_dir = os.path.join("/opt/airflow/shared", "/vietstock")
+    data_dir = os.path.join("/opt/airflow/shared", "vietstock")
     os.makedirs(data_dir, exist_ok=True)
     
     results = []

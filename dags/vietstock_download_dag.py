@@ -1,7 +1,7 @@
-from airflow import DAG
-from airflow.operators.python import PythonOperator
-from airflow.models import Variable
-from airflow.models.param import Param
+from airflow.sdk import DAG
+from airflow.providers.standard.operators.python import PythonOperator
+from airflow.sdk import Variable
+from airflow.sdk import Param
 from datetime import datetime, timedelta
 import pendulum
 import json
@@ -34,7 +34,7 @@ def download_vietstock_data(**context):
     print(f"Date range: {from_date} to {to_date} (timestamp: {from_timestamp} to {to_timestamp})")
     
     # Create data directory if it doesn't exist
-    data_dir = os.path.join(os.path.dirname(__file__), "../data")
+    data_dir = os.path.join("/opt/airflow/shared", "/vietstock")
     os.makedirs(data_dir, exist_ok=True)
     
     results = []
@@ -87,11 +87,11 @@ with DAG(
     dag_display_name="[Vietstock] - Download Stock Data",
     dag_id="vietstock_download_stock_data",
     start_date=datetime(2025, 1, 1, tzinfo=local_tz),
-    schedule_interval=None,  # Manual trigger only
+    schedule=None,  # Manual trigger only
     catchup=False,
-    tags=["vietstock", "manual"],
+    # tags=["vietstock", "manual"],
     params={
-        "symbols": Param( default=["HPG", "VNM", "FPT"], type="array", description="List of stock symbols to download"),
+        "symbols": Param(default=["HPG", "VNM", "FPT"], type="array", description="List of stock symbols to download"),
         "resolution": Param( default="1", type="string", description="Time resolution (1 for 1 minute, 60 for 1 hour, 1D for 1 day)" ),
         "from": Param( default="2024-01-01", type="string", format="date", description="Start date (YYYY-MM-DD)"),
         "to": Param( default="2025-05-31", type="string", format="date", description="End date (YYYY-MM-DD)" )

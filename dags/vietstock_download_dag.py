@@ -67,8 +67,8 @@ def download_vietstock_data(**context):
             
             # Sleep 60 seconds between requests (except for the last one)
             if idx < len(symbols) - 1:
-                print(f"Waiting 60 seconds before next request...")
-                time.sleep(60)
+                print(f"Waiting 120 seconds before next request...")
+                time.sleep(120)
     
     print(f"Successfully downloaded data for {len(results)} symbol(s)")
     

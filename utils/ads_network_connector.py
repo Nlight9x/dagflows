@@ -23,33 +23,9 @@ class GalaksionAsyncConnector(AdsNetworkAsyncConnector):
         "Accept": "application/json"
     }
 
-    def __init__(self, **config):
+    def __init__(self, token):
         super().__init__()
-        self._email = config.get('email')
-        self._password = config.get('password')
-        
-        self._token = None
-
-    async def authenticate(self):
-        if not self._email or not self._password:
-            raise ValueError("Email and password are required")
-
-        data = {
-            "email": self._email,
-            "password": self._password
-        }
-
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                self._auth_url,
-                headers=self._default_headers,
-                json=data
-            )
-            if response.status_code == 200:
-                res_body = response.json()
-                self._token = res_body.get('token')
-                return self._token
-            return None
+        self._token = token
 
     async def get_reports(self, date_from, date_to, group_by=None, order_by=None, limit=100, offset=0, campaigns=None):
         if not self._token:

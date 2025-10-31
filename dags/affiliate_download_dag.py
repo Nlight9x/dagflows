@@ -114,10 +114,7 @@ def download_and_export_nocodb_involve_data(**context):
 
 
 def download_and_export_nocodb_galaksion_data(**context):
-    galaksion_credential = Variable.get("galaksion_credential")
-    cred = json.loads(galaksion_credential)
-    galaksion_email = cred["email"]
-    galaksion_password = cred["password"]
+    galaksion_token = Variable.get("galaksion_token")
     
     nocodb_api_url = Variable.get("nocodb_galaksion_statistics_put_endpoint")
     nocodb_token = Variable.get("nocodb_token")
@@ -257,8 +254,7 @@ def download_and_export_nocodb_galaksion_data(**context):
             exporter.export([total_data])
 
     async def fetch_and_push_galaksion_data():
-        connector = GalaksionAsyncConnector(email=galaksion_email, password=galaksion_password)
-        await connector.authenticate()
+        connector = GalaksionAsyncConnector(token=galaksion_token)
         limit = 100
         buffer_size = 500
         order_by = {"field": "money", "direction": "desc"}

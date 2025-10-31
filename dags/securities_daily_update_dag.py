@@ -106,7 +106,7 @@ def download_securities_data(**context):
     date_str = execution_date.strftime("%Y-%m-%d")
     
     # Get list of symbols from Airflow Variable
-    symbols_str = Variable.get("securities_symbols", default_var='["HPG", "VNM", "FPT"]')
+    symbols_str = Variable.get("securities_symbols", default='["HPG", "VNM", "FPT"]')
     try:
         symbols = json.loads(symbols_str) if isinstance(symbols_str, str) else symbols_str
     except:
@@ -255,7 +255,7 @@ def push_to_clickhouse(**context):
     date_str = execution_date.strftime("%Y-%m-%d")
     
     # Get ClickHouse connection info from Airflow Variables
-    clickhouse_config = Variable.get("clickhouse_connection_info", default_var=None)
+    clickhouse_config = Variable.get("clickhouse_connection_info", default=None)
     if clickhouse_config:
         try:
             clickhouse_config = json.loads(clickhouse_config) if isinstance(clickhouse_config, str) else clickhouse_config
@@ -265,15 +265,15 @@ def push_to_clickhouse(**context):
     if not clickhouse_config:
         # Fallback to individual variables
         clickhouse_config = {
-            'host': Variable.get("clickhouse_host", default_var='localhost'),
-            'port': int(Variable.get("clickhouse_port", default_var='9000')),
-            'database': Variable.get("clickhouse_database", default_var='default'),
-            'user': Variable.get("clickhouse_user", default_var='default'),
-            'password': Variable.get("clickhouse_password", default_var=''),
+            'host': Variable.get("clickhouse_host", default='localhost'),
+            'port': int(Variable.get("clickhouse_port", default='9000')),
+            'database': Variable.get("clickhouse_database", default='default'),
+            'user': Variable.get("clickhouse_user", default='default'),
+            'password': Variable.get("clickhouse_password", default=''),
         }
     
     # Get table name
-    table_name = Variable.get("clickhouse_securities_table", default_var='securities_minute_data')
+    table_name = Variable.get("clickhouse_securities_table", default='securities_minute_data')
     clickhouse_config['table_name'] = table_name
     
     # Read data from shared folder
@@ -384,7 +384,7 @@ with DAG(
     start_date=datetime(2025, 1, 1, tzinfo=local_tz),
     schedule="0 15 * * *",  # Daily at 3:00 PM (after market close)
     catchup=False,
-    tags=["securities", "clickhouse", "daily"],
+    # tags=["securities", "clickhouse", "daily"],
 ) as dag:
     
     # Task 1: Download securities data

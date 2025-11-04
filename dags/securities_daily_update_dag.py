@@ -9,7 +9,7 @@ See securities_table_schema.sql for the table schema.
 from airflow.sdk import DAG
 from airflow.providers.standard.operators.python import PythonOperator
 from airflow.sdk import Variable
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import pendulum
 import json
 import os
@@ -17,6 +17,16 @@ import time
 
 from utils.market_data_connector import VietstockConnector
 from utils.storage_exporter import ClickHouseExporter
+
+
+class DateTimeEncoder(json.JSONEncoder):
+    """Custom JSON encoder to handle datetime and date objects"""
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        if isinstance(obj, date):
+            return obj.isoformat()
+        return super().default(obj)
 
 
 def _get_data_date(**context):
@@ -91,17 +101,21 @@ def download_securities_data(**context):
                         volumes = data.get('v', [])
                         
                         for i, ts in enumerate(timestamps):
+                            # Convert timestamp to datetime object for ClickHouse compatibility
+                            dt = datetime.fromtimestamp(ts)
+                            # Convert date string to date object for ClickHouse compatibility
+                            date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
                             standardized_data.append({
                                 'symbol': symbol,
                                 'timestamp': ts,
-                                'datetime': datetime.fromtimestamp(ts).isoformat(),
+                                'datetime': dt,  # Use datetime object instead of ISO string
                                 'open': opens[i] if i < len(opens) else None,
                                 'high': highs[i] if i < len(highs) else None,
                                 'low': lows[i] if i < len(lows) else None,
                                 'close': closes[i] if i < len(closes) else None,
                                 'volume': volumes[i] if i < len(volumes) else None,
                                 'source': 'vietstock',
-                                'date': date_str
+                                'date': date_obj  # Use date object instead of string
                             })
                     else:
                         # If data format is different, try to use as is
@@ -117,7 +131,7 @@ def download_securities_data(**context):
                     output_path = os.path.join(data_dir, output_filename)
                     
                     with open(output_path, 'w', encoding='utf-8') as f:
-                        json.dump(standardized_data, f, ensure_ascii=False, indent=2)
+                        json.dump(standardized_data, f, ensure_ascii=False, indent=2, cls=DateTimeEncoder)
                     
                     record_count = len(standardized_data)
                     print(f"[{idx + 1}/{len(symbols)}] Saved {symbol}: {output_path} ({record_count} records)")
@@ -262,6 +276,32 @@ def push_to_clickhouse(**context):
                 if not data or len(data) == 0:
                     print(f"No data in file: {file_path}")
                     continue
+                
+                # Convert datetime and date strings back to objects for ClickHouse
+                # (JSON serializes datetime/date objects as strings)
+                for record in data:
+                    # Convert datetime string to datetime object
+                    if 'datetime' in record and isinstance(record['datetime'], str):
+                        try:
+                            # Try parsing ISO format datetime string
+                            record['datetime'] = datetime.fromisoformat(record['datetime'].replace('Z', '+00:00'))
+                        except:
+                            # Fallback: try parsing other common formats
+                            try:
+                                record['datetime'] = datetime.strptime(record['datetime'], '%Y-%m-%dT%H:%M:%S')
+                            except:
+                                # If parsing fails, use timestamp to create datetime
+                                if 'timestamp' in record:
+                                    record['datetime'] = datetime.fromtimestamp(record['timestamp'])
+                    
+                    # Convert date string to date object
+                    if 'date' in record and isinstance(record['date'], str):
+                        try:
+                            record['date'] = datetime.strptime(record['date'], '%Y-%m-%d').date()
+                        except:
+                            # If parsing fails, try to extract from datetime
+                            if 'datetime' in record and isinstance(record['datetime'], datetime):
+                                record['date'] = record['datetime'].date()
                 
                 # Export to ClickHouse
                 result = exporter.export(

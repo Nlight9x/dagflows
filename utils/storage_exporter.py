@@ -323,3 +323,163 @@ class PostgresSQLExporter(StorageExporter):
     def close(self):
         """Close the underlying driver connection pool"""
         self._driver.close_pool()
+
+
+class ClickHouseDriver:
+    """Low-level ClickHouse driver with connection management and basic operations"""
+    
+    def __init__(self, **config):
+        self._host = config.get('host', 'localhost')
+        self._port = config.get('port', 9000)
+        self._database = config.get('database', 'default')
+        self._user = config.get('user', 'default')
+        self._password = config.get('password', '')
+        self._client = None
+    
+    def _get_client(self):
+        """Get or create ClickHouse client"""
+        if self._client is None:
+            try:
+                from clickhouse_driver import Client
+            except ImportError:
+                raise ImportError("clickhouse-driver not installed. Please install it: pip install clickhouse-driver")
+            
+            self._client = Client(
+                host=self._host,
+                port=self._port,
+                database=self._database,
+                user=self._user,
+                password=self._password
+            )
+        return self._client
+    
+    def execute_query(self, query, params=None, fetch=False):
+        """Execute a query and optionally fetch results"""
+        client = self._get_client()
+        if params:
+            result = client.execute(query, params)
+        else:
+            result = client.execute(query)
+        
+        if fetch:
+            return result
+        return len(result) if isinstance(result, list) else 0
+    
+    def batch_insert(self, data, table_name, keys=None, keys_mode="include", column_mapping=None):
+        """
+        Batch insert data into ClickHouse table
+        
+        Args:
+            data: List of dictionaries containing data to insert
+            table_name: Target table name
+            keys: List of keys to include/exclude (optional)
+            keys_mode: 'include' or 'exclude' (default: 'include')
+            column_mapping: Dictionary mapping source columns to target columns (optional)
+        
+        Returns:
+            int: Number of records inserted
+        """
+        if not data or len(data) == 0:
+            return 0
+        
+        # Determine which columns to insert
+        if keys is None:
+            target_keys = list(data[0].keys())
+        else:
+            if keys_mode not in ("include", "exclude"):
+                raise ValueError("keys_mode must be 'include' or 'exclude'")
+            if keys_mode == "include":
+                target_keys = [k for k in keys if k in data[0].keys()]
+            else:
+                target_keys = [k for k in data[0].keys() if k not in keys]
+        
+        # Apply column mapping to get target columns
+        column_mapping = column_mapping or {}
+        target_cols = [column_mapping.get(tk, tk) for tk in target_keys]
+        
+        # Prepare data rows
+        rows = []
+        for record in data:
+            values = [record.get(k) for k in target_keys]
+            rows.append(tuple(values))
+        
+        # Insert data into ClickHouse
+        column_names_str = ', '.join([f'`{col}`' for col in target_cols])
+        insert_query = f"INSERT INTO `{self._database}`.`{table_name}` ({column_names_str}) VALUES"
+        
+        client = self._get_client()
+        client.execute(insert_query, rows)
+        
+        return len(rows)
+    
+    def close_pool(self):
+        """Close ClickHouse client connection"""
+        if self._client:
+            self._client.disconnect()
+            self._client = None
+            print("ClickHouse connection closed")
+
+
+class ClickHouseExporter(StorageExporter):
+    """High-level exporter that uses ClickHouseDriver for data export operations"""
+    
+    def __init__(self, **config):
+        super().__init__()
+        self._table_name = config.get('table_name')
+        self._driver = ClickHouseDriver(**config)
+        self._retry_count = config.get('retry_count', 3)
+        self._retry_delay = config.get('retry_delay', 10)
+    
+    def export(self, data, **settings):
+        """
+        Export data to ClickHouse
+        
+        Args:
+            data: List of dictionaries containing data to export
+            settings: Additional settings including:
+                - batch_size: Number of records to insert per batch (default: 1000)
+                - column_mapping: Dictionary mapping source columns to target columns
+                - keys: List of keys to include/exclude
+                - keys_mode: 'include' or 'exclude' (default: 'include')
+        
+        Returns:
+            dict: Result containing exported_records, table name
+        """
+        if not data or not isinstance(data, list):
+            raise ValueError("Data must be a list of dicts")
+        if len(data) == 0:
+            return {"exported_records": 0, "table": self._table_name}
+        
+        column_mapping = settings.get('column_mapping', {})
+        keys = settings.get('keys')
+        keys_mode = settings.get('keys_mode', 'include')
+        batch_size = settings.get('batch_size', 1000)
+        
+        # Execute operation with retry logic
+        for attempt in range(self._retry_count):
+            try:
+                # ClickHouse doesn't support upsert natively, so we only do insert
+                total_processed = self._driver.batch_insert(
+                    data, self._table_name, keys=keys, keys_mode=keys_mode, column_mapping=column_mapping
+                )
+                
+                return {
+                    "exported_records": total_processed,
+                    "table": self._table_name,
+                    "column_mapping": column_mapping,
+                    "operation": "insert"
+                }
+                
+            except Exception as e:
+                if attempt < self._retry_count - 1:
+                    print(f"Retry ClickHouse export, attempt {attempt+2}/{self._retry_count}...")
+                    time.sleep(self._retry_delay)
+                else:
+                    print(f"ClickHouse export failed after {self._retry_count} attempts: {e}")
+                    raise
+        
+        return {"exported_records": 0, "table": self._table_name}
+    
+    def close(self):
+        """Close the underlying driver connection"""
+        self._driver.close_pool()

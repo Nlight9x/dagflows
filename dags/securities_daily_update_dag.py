@@ -2,6 +2,9 @@
 DAG for daily securities data update
 - Task 1: Download stock data from multiple sources (Vietstock, future connectors)
 - Task 2: Push downloaded data to ClickHouse
+
+IMPORTANT: Before running this DAG, create the ClickHouse table first.
+See securities_table_schema.sql for the table schema.
 """
 from airflow.sdk import DAG
 from airflow.providers.standard.operators.python import PythonOperator
@@ -11,90 +14,15 @@ import pendulum
 import json
 import os
 import time
-from typing import List, Dict, Any, Optional
 
 from utils.market_data_connector import VietstockConnector
+from utils.storage_exporter import ClickHouseExporter
 
 
 def _get_data_date(**context):
     """Get the data date from context (previous day)"""
     logical_date = context.get('logical_date') if 'logical_date' in context else datetime.now()
     return (logical_date - timedelta(days=1)).date()
-
-
-class ClickHouseExporter:
-    """Simple ClickHouse exporter for pushing data to ClickHouse"""
-    
-    def __init__(self, **config):
-        self._host = config.get('host', 'localhost')
-        self._port = config.get('port', 9000)
-        self._database = config.get('database', 'default')
-        self._user = config.get('user', 'default')
-        self._password = config.get('password', '')
-        self._table_name = config.get('table_name')
-        self._retry_count = config.get('retry_count', 3)
-        self._retry_delay = config.get('retry_delay', 10)
-    
-    def export(self, data: List[Dict[str, Any]], **settings):
-        """
-        Export data to ClickHouse
-        
-        Args:
-            data: List of dictionaries containing data to export
-            settings: Additional settings including:
-                - batch_size: Number of records to insert per batch (default: 1000)
-        """
-        if not data or not isinstance(data, list):
-            raise ValueError("Data must be a list of dicts")
-        if len(data) == 0:
-            return {"exported_records": 0}
-        
-        try:
-            from clickhouse_driver import Client
-        except ImportError:
-            raise ImportError("clickhouse-driver not installed. Please install it: pip install clickhouse-driver")
-        
-        client = Client(
-            host=self._host,
-            port=self._port,
-            database=self._database,
-            user=self._user,
-            password=self._password,
-            settings={'insert_block_size': settings.get('batch_size', 1000)}
-        )
-        
-        try:
-            # Get column names from first record
-            target_keys = list(data[0].keys())
-            target_cols = target_keys
-            
-            # Prepare data rows
-            rows = []
-            for record in data:
-                values = [record.get(k) for k in target_keys]
-                rows.append(tuple(values))
-            
-            # Insert data into ClickHouse
-            column_names_str = ', '.join([f'`{col}`' for col in target_cols])
-            insert_query = f"INSERT INTO `{self._database}`.`{self._table_name}` ({column_names_str}) VALUES"
-            
-            # Execute with retry logic
-            for attempt in range(self._retry_count):
-                try:
-                    client.execute(insert_query, rows)
-                    print(f"Successfully exported {len(rows)} records to ClickHouse table '{self._table_name}'")
-                    return {"exported_records": len(rows)}
-                except Exception as e:
-                    if attempt < self._retry_count - 1:
-                        print(f"Retry ClickHouse export, attempt {attempt+2}/{self._retry_count}...")
-                        time.sleep(self._retry_delay)
-                    else:
-                        print(f"ClickHouse export failed after {self._retry_count} attempts: {e}")
-                        raise
-            
-            return {"exported_records": 0}
-        finally:
-            client.disconnect()
 
 
 def download_securities_data(**context):
@@ -305,73 +233,81 @@ def push_to_clickhouse(**context):
     print(f"Found {len(metadata['downloaded_files'])} files to process")
     
     # Initialize ClickHouse exporter
+    # Note: Table must be created beforehand. See SQL schema below for reference.
     exporter = ClickHouseExporter(**clickhouse_config)
     
-    total_exported = 0
-    results = []
-    
-    # Process each file
-    for file_info in metadata['downloaded_files']:
-        if file_info.get('status') != 'success':
-            print(f"Skipping {file_info.get('symbol')}: status = {file_info.get('status')}")
-            continue
+    try:
+        total_exported = 0
+        results = []
         
-        file_path = file_info.get('file_path')
-        if not file_path or not os.path.exists(file_path):
-            print(f"File not found: {file_path}")
-            continue
-        
-        symbol = file_info.get('symbol', 'UNKNOWN')
-        print(f"Processing {symbol}...")
-        
-        try:
-            # Read data from JSON file
-            with open(file_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            
-            if not data or len(data) == 0:
-                print(f"No data in file: {file_path}")
+        # Process each file
+        for file_info in metadata['downloaded_files']:
+            if file_info.get('status') != 'success':
+                print(f"Skipping {file_info.get('symbol')}: status = {file_info.get('status')}")
                 continue
             
-            # Export to ClickHouse
-            result = exporter.export(
-                data=data,
-                batch_size=1000
-            )
+            file_path = file_info.get('file_path')
+            if not file_path or not os.path.exists(file_path):
+                print(f"File not found: {file_path}")
+                continue
             
-            exported_count = result.get('exported_records', 0)
-            total_exported += exported_count
+            symbol = file_info.get('symbol', 'UNKNOWN')
+            print(f"Processing {symbol}...")
             
-            print(f"Exported {exported_count} records for {symbol}")
-            
-            results.append({
-                'symbol': symbol,
-                'exported_records': exported_count,
-                'status': 'success'
-            })
-            
-        except Exception as e:
-            print(f"Error processing {symbol}: {e}")
-            results.append({
-                'symbol': symbol,
-                'exported_records': 0,
-                'status': 'failed',
-                'error': str(e)
-            })
-    
-    summary = {
-        'date': date_str,
-        'total_exported': total_exported,
-        'processed_files': len(results),
-        'success_count': sum(1 for r in results if r.get('status') == 'success'),
-        'failed_count': sum(1 for r in results if r.get('status') == 'failed'),
-        'results': results
-    }
-    
-    print(f"Summary: Exported {total_exported} records to ClickHouse")
-    print(f"Success: {summary['success_count']}, Failed: {summary['failed_count']}")
-    
-    return summary
+            try:
+                # Read data from JSON file
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                
+                if not data or len(data) == 0:
+                    print(f"No data in file: {file_path}")
+                    continue
+                
+                # Export to ClickHouse
+                result = exporter.export(
+                    data=data,
+                    batch_size=1000,
+                    column_mapping=None,  # Optional: map column names if needed
+                    keys=None,  # Optional: specify which keys to include/exclude
+                    keys_mode='include'  # Optional: 'include' or 'exclude'
+                )
+                
+                exported_count = result.get('exported_records', 0)
+                total_exported += exported_count
+                
+                print(f"Exported {exported_count} records for {symbol}")
+                
+                results.append({
+                    'symbol': symbol,
+                    'exported_records': exported_count,
+                    'status': 'success'
+                })
+                
+            except Exception as e:
+                print(f"Error processing {symbol}: {e}")
+                results.append({
+                    'symbol': symbol,
+                    'exported_records': 0,
+                    'status': 'failed',
+                    'error': str(e)
+                })
+        
+        summary = {
+            'date': date_str,
+            'total_exported': total_exported,
+            'processed_files': len(results),
+            'success_count': sum(1 for r in results if r.get('status') == 'success'),
+            'failed_count': sum(1 for r in results if r.get('status') == 'failed'),
+            'results': results
+        }
+        
+        print(f"Summary: Exported {total_exported} records to ClickHouse")
+        print(f"Success: {summary['success_count']}, Failed: {summary['failed_count']}")
+        
+        return summary
+    finally:
+        # Close ClickHouse connection
+        exporter.close()
 
 
 # Set timezone

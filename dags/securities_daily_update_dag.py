@@ -201,7 +201,7 @@ def push_to_clickhouse(**context):
         }
     
     # Get table name
-    table_name = Variable.get("clickhouse_securities_table", default='securities_minute_data')
+    table_name = Variable.get("clickhouse_securities_table", default='stock_price_minute')
     clickhouse_config['table_name'] = table_name
     
     # Read data from shared folder

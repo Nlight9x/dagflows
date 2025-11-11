@@ -180,13 +180,12 @@ def download_securities_data(dag_config, **context):
                                 'low': lows[i] if i < len(lows) else None,
                                 'close': closes[i] if i < len(closes) else None,
                                 'volume': volumes[i] if i < len(volumes) else None,
-                                'source': 'vietstock',
                                 'date': dt.date()
                             })
                     elif isinstance(data, list):
                         day_value = datetime.strptime(date_str, '%Y-%m-%d').date()
                         for item in data:
-                            standardized_data.append({**item, 'symbol': symbol, 'source': 'vietstock', 'date': day_value})
+                            standardized_data.append({**item, 'symbol': symbol, 'date': day_value})
                     else:
                         print(f"Warning: Unexpected data format for {symbol}, skipping")
                         standardized_data = []
@@ -429,6 +428,8 @@ def push_to_clickhouse(interval_minutes, table_name, dag_config, **context):
                     'date': date_obj
                 } for win_start, w in windows]
             else:
+                for r in data:
+                    r.pop('source')
                 records_to_export = data
 
             if not records_to_export:

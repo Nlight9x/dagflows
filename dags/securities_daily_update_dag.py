@@ -44,7 +44,8 @@ class DateTimeEncoder(json.JSONEncoder):
 def _get_data_date(**context):
     """Get the data date from context (previous day)"""
     logical_date = context.get('logical_date') if 'logical_date' in context else datetime.now()
-    return (logical_date - timedelta(days=1)).date()
+    # return (logical_date - timedelta(days=1)).date()
+    return logical_date.date()
 
 
 def load_dag_config():
@@ -428,8 +429,6 @@ def push_to_clickhouse(interval_minutes, table_name, dag_config, **context):
                     'date': date_obj
                 } for win_start, w in windows]
             else:
-                for r in data:
-                    r.pop('source')
                 records_to_export = data
 
             if not records_to_export:

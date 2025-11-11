@@ -466,7 +466,7 @@ with DAG(
     dag_display_name="Securities Daily Update",
     dag_id=DAG_ID,
     start_date=datetime(2025, 1, 1, tzinfo=local_tz),
-    schedule="0 15 * * *",  # Daily at 3:00 PM (after market close)
+    schedule="30 15 * * *",  # Daily at 3:00 PM (after market close)
     catchup=False,
     # tags=["securities", "clickhouse", "daily"],
 ) as dag:

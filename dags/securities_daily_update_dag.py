@@ -330,7 +330,7 @@ def push_to_clickhouse(interval_minutes, table_name, dag_config, **context):
             if records_df.empty:
                 continue
             
-            print(records_df)
+            # print(records_df)
             batch_size = int(dag_config.get('export_batch_size', 1000))
             result = export_records_to_clickhouse(exporter, records_df, table_name, clickhouse_config, batch_size=batch_size)
             exported_count = result.get('exported_records', 0)

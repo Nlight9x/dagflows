@@ -514,8 +514,6 @@ class ClickHouseExporter(StorageExporter):
             DELETE WHERE `{date_column}` = %(target_date)s
             SETTINGS mutations_sync = 1
         """
-        print(query)
         for value in cleaned_dates:
             self._driver.execute_query(query, {'target_date': value})
-        print("Delete done")
         return len(cleaned_dates)

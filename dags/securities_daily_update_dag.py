@@ -257,11 +257,11 @@ def export_records_to_clickhouse(records_df: pd.DataFrame, table_name, clickhous
     cfg['table_name'] = table_name
     exporter = ClickHouseExporter(**cfg)
     try:
-        delete_dates = []
-        if 'date' in records_df.columns:
-            delete_dates = [d for d in records_df['date'].dropna().unique().tolist() if d]
-            if delete_dates:
-                exporter.delete_by_dates(delete_dates)
+        # delete_dates = []
+        # if 'date' in records_df.columns:
+        #     delete_dates = [d for d in records_df['date'].dropna().unique().tolist() if d]
+        #     if delete_dates:
+        #         exporter.delete_by_dates(delete_dates)
         records = records_df.to_dict(orient='records')
         return exporter.export(
             data=records,

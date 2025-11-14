@@ -213,7 +213,7 @@ def download_securities_data(dag_config, **context):
 
 
 def aggregate_minute_records(records: pd.DataFrame, interval_minutes):
-    if records.empty or interval_minutes <= 1:
+    if records.empty or not interval_minutes or interval_minutes <= 1:
         return records.copy()
 
     df = records.copy()
@@ -251,12 +251,16 @@ def export_records_to_clickhouse(records_df: pd.DataFrame, table_name, clickhous
     if records_df is None or records_df.empty:
         return {'exported_records': 0, 'status': 'skipped'}
 
-    records = records_df.to_dict(orient='records')
-
     cfg = dict(clickhouse_config)
     cfg['table_name'] = table_name
     exporter = ClickHouseExporter(**cfg)
     try:
+        delete_dates = []
+        if 'date' in records_df.columns:
+            delete_dates = [d for d in records_df['date'].dropna().unique().tolist() if d]
+            if delete_dates:
+                exporter.delete_by_dates(delete_dates)
+        records = records_df.to_dict(orient='records')
         return exporter.export(
             data=records,
             batch_size=batch_size,

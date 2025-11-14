@@ -4,6 +4,7 @@ import asyncio
 import csv
 import os
 import time
+from datetime import datetime, date
 import psycopg2
 from psycopg2.extras import execute_values
 from psycopg2 import pool
@@ -483,3 +484,37 @@ class ClickHouseExporter(StorageExporter):
     def close(self):
         """Close the underlying driver connection"""
         self._driver.close_pool()
+
+    def delete_by_dates(self, dates, date_column='date'):
+        """Delete existing rows for specified dates before inserting new data"""
+        if not dates:
+            return 0
+        if not isinstance(dates, (list, tuple, set)):
+            dates = [dates]
+
+        cleaned_dates = []
+        for value in dates:
+            if value is None:
+                continue
+            if isinstance(value, datetime):
+                value = value.date()
+            if isinstance(value, str):
+                try:
+                    value = datetime.strptime(value, "%Y-%m-%d").date()
+                except ValueError:
+                    continue
+            if isinstance(value, date):
+                cleaned_dates.append(value)
+
+        if not cleaned_dates:
+            return 0
+
+        query = f"""
+            ALTER TABLE `{self._table_name}`
+            DELETE WHERE `{date_column}` = %(target_date)s
+            SETTINGS mutations_sync = 1
+        """
+        for value in cleaned_dates:
+            self._driver.execute_query(query, {'target_date': value})
+
+        return len(cleaned_dates)

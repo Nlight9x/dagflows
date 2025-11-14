@@ -1,15 +1,18 @@
 import httpx
 import pandas as pd
 from datetime import datetime, timedelta, date, time
+from zoneinfo import ZoneInfo
 
 
 class SecuritiesPriceParser:
 
     _default_time_sessions = [(time(9, 15), time(11, 30)),  (time(13, 0), time(14, 45))]
+    _local_tz = ZoneInfo("Asia/Ho_Chi_Minh")
 
     def __init__(self,  **config):
         self._auto_fill_gap = config.get('auto_fill_gap', True)
         self._session_time = config.get('trading_sessions', self._default_time_sessions)
+        self._local_tz = config.get('local_tz', self._local_tz)
 
     def parse(self, raw_data, symbol=None) -> pd.DataFrame:
         raise NotImplementedError
@@ -56,7 +59,8 @@ class VietstockParser(SecuritiesPriceParser):
                 raise ValueError("Raw Vietstock data must include 'timestamp' column")
 
         df['timestamp'] = df['timestamp'].astype(int)
-        df['datetime'] = pd.to_datetime(df['timestamp'], unit='s')
+        df['datetime'] = pd.to_datetime(df['timestamp'], unit='s', utc=True)\
+            .dt.tz_convert(LOCAL_TZ).dt.tz_localize(None)
         df.sort_values('datetime', inplace=True)
 
         if 'symbol' not in df.columns:

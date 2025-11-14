@@ -248,19 +248,11 @@ def aggregate_minute_records(records: pd.DataFrame, interval_minutes):
     return resampled[['datetime', 'timestamp', 'open', 'high', 'low', 'close', 'volume']]
 
 
-def export_records_to_clickhouse(records_df: pd.DataFrame, table_name, clickhouse_config, batch_size=1000):
+def export_records_to_clickhouse(exporter, records_df: pd.DataFrame, table_name, clickhouse_config, batch_size=1000):
     """Export a dataframe to ClickHouse table using ClickHouseExporter"""
     if records_df is None or records_df.empty:
         return {'exported_records': 0, 'status': 'skipped'}
-
-    cfg = dict(clickhouse_config)
-    cfg['table_name'] = table_name
-    exporter = ClickHouseExporter(**cfg)
     try:
-        if 'date' in records_df.columns:
-            delete_dates = [d for d in records_df['date'].dropna().unique().tolist() if d]
-            if delete_dates:
-                exporter.delete_by_dates(delete_dates)
         records = records_df.to_dict(orient='records')
         return exporter.export(
             data=records,
@@ -304,6 +296,10 @@ def push_to_clickhouse(interval_minutes, table_name, dag_config, **context):
     total_exported = 0
     results = []
 
+    clickhouse_config['table_name'] = table_name
+    exporter = ClickHouseExporter(**clickhouse_config)
+    exporter.delete_by_dates([execution_date])
+
     for file_info in metadata['downloaded_files']:
         if file_info.get('status') != 'success':
             continue
@@ -336,7 +332,7 @@ def push_to_clickhouse(interval_minutes, table_name, dag_config, **context):
             
             print(records_df)
             batch_size = int(dag_config.get('export_batch_size', 1000))
-            result = export_records_to_clickhouse(records_df, table_name, clickhouse_config, batch_size=batch_size)
+            result = export_records_to_clickhouse(exporter, records_df, table_name, clickhouse_config, batch_size=batch_size)
             exported_count = result.get('exported_records', 0)
             total_exported += exported_count
             print(f"Exported {exported_count} {interval_label} records for {symbol} -> {table_name}")

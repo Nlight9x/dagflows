@@ -153,10 +153,10 @@ class VietstockConnector(SecuritiesMarketConnector):
     def get_raw_history(self, symbol, **params):
 
         params['symbol'] = symbol
-        if 'to' not in params:
-            params['to'] = datetime.now().timestamp()
-        if 'from' not in params:
-            params['from'] = params['to'] - 86400  # -1d
+        if 'to_timestamp' not in params:
+            params['to_timestamp'] = datetime.now().timestamp()
+        if 'from_timestamp' not in params:
+            params['from_timestamp'] = params['to_timestamp'] - 86400  # -1d
         
         if self._client is None:
             raise RuntimeError("Client not initialized. Use VietstockConnector as context manager.")

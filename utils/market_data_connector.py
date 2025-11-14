@@ -1,7 +1,122 @@
 import httpx
+import pandas as pd
+from datetime import datetime, timedelta, date, time
 
 
-class VietstockConnector:
+class SecuritiesPriceParser:
+
+    _default_time_sessions = [(time(9, 15), time(11, 30)),  (time(13, 0), time(14, 45))]
+
+    def __init__(self,  **config):
+        self._auto_fill_gap = config.get('auto_fill_gap', True)
+        self._session_time = config.get('trading_sessions', self._default_time_sessions)
+
+    def parse(self, raw_data, symbol=None) -> pd.DataFrame:
+        raise NotImplementedError
+
+
+class VietstockParser(SecuritiesPriceParser):
+    def __init__(self, **config):
+        super().__init__(**config)
+
+    def parse(self, raw_data, symbol=None) -> pd.DataFrame:
+        if not raw_data:
+            columns = ['symbol', 'timestamp', 'datetime', 'open', 'high', 'low', 'close', 'volume', 'date']
+            return pd.DataFrame(columns=columns)
+
+        if isinstance(raw_data, dict) and 't' in raw_data:
+            timestamps = raw_data.get('t', [])
+            opens = raw_data.get('o', [])
+            highs = raw_data.get('h', [])
+            lows = raw_data.get('l', [])
+            closes = raw_data.get('c', [])
+            volumes = raw_data.get('v', [])
+
+            df = pd.DataFrame({
+                'timestamp': timestamps,
+                'open': opens,
+                'high': highs,
+                'low': lows,
+                'close': closes,
+                'volume': volumes,
+            })
+        elif isinstance(raw_data, list):
+            df = pd.DataFrame(raw_data)
+        else:
+            df = pd.DataFrame()
+
+        if df.empty:
+            columns = ['symbol', 'timestamp', 'datetime', 'open', 'high', 'low', 'close', 'volume', 'date']
+            return pd.DataFrame(columns=columns)
+
+        if 'timestamp' not in df.columns:
+            if 't' in df.columns:
+                df.rename(columns={'t': 'timestamp'}, inplace=True)
+            else:
+                raise ValueError("Raw Vietstock data must include 'timestamp' column")
+
+        df['timestamp'] = df['timestamp'].astype(int)
+        df['datetime'] = pd.to_datetime(df['timestamp'], unit='s')
+        df.sort_values('datetime', inplace=True)
+
+        if 'symbol' not in df.columns:
+            df['symbol'] = symbol
+        elif symbol is not None:
+            df['symbol'] = symbol
+
+        numeric_cols = ['open', 'high', 'low', 'close', 'volume']
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+            else:
+                df[col] = None
+
+        df['date'] = df['datetime'].dt.date
+
+        if self._auto_fill_gap:
+            filled_frames = []
+            for trading_day in sorted(df['date'].unique()):
+                day_df = df[df['date'] == trading_day]
+                session_ranges = []
+                for session_start, session_end in self._session_time:
+                    start_dt = datetime.combine(trading_day, session_start)
+                    end_dt = datetime.combine(trading_day, session_end)
+                    session_ranges.append(pd.date_range(start_dt, end_dt, freq='T'))
+
+                if session_ranges:
+                    expected_index = pd.DatetimeIndex(sorted(set().union(*session_ranges)))
+                    day_df = day_df.set_index('datetime').reindex(expected_index)
+                    day_df['symbol'] = day_df['symbol'].fillna(symbol)
+                    day_df['timestamp'] = (day_df.index.view('int64') // 10**9).astype(int)
+                    day_df['volume'] = day_df['volume'].fillna(0)
+                    day_df['close'] = day_df['close'].ffill()
+                    day_df['open'] = day_df['open'].fillna(day_df['close'])
+                    day_df['high'] = day_df['high'].fillna(day_df['close'])
+                    day_df['low'] = day_df['low'].fillna(day_df['close'])
+                    day_df['date'] = trading_day
+                    day_df = day_df.reset_index().rename(columns={'index': 'datetime'})
+                else:
+                    day_df = day_df.reset_index(drop=True)
+
+                filled_frames.append(day_df)
+
+            df = pd.concat(filled_frames, ignore_index=True)
+        else:
+            df = df.reset_index(drop=True)
+
+        df = df[['symbol', 'timestamp', 'datetime', 'open', 'high', 'low', 'close', 'volume', 'date']]
+        return df
+
+
+class SecuritiesMarketConnector:
+    def __init__(self,  **setting):
+        pass
+
+    def get_history(self, **params):
+        pass
+
+
+class VietstockConnector(SecuritiesMarketConnector):
     """Connector for Vietstock API to download stock market data"""
     
     _base_url = "https://api.vietstock.vn/tvnew/history"
@@ -12,133 +127,46 @@ class VietstockConnector:
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36'
     }
     
-    def __init__(self, timeout=30.0):
+    def __init__(self, **setting):
         """
         Initialize Vietstock connector
         
         Args:
             timeout: Request timeout in seconds (default: 30.0)
         """
-        self.timeout = timeout
-        self.client = None
+        super().__init__(**setting)
+        self._timeout = setting.get('timeout', 30)
+        self._parser = setting.get('parser', VietstockParser())
+
+        self._client = None
     
     def __enter__(self):
         """Context manager entry"""
-        self.client = httpx.Client(timeout=self.timeout)
+        self._client = httpx.Client(timeout=self._timeout)
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Context manager exit"""
-        if self.client:
-            self.client.close()
+        if self._client:
+            self._client.close()
     
-    def get_history(self, symbol, resolution='1', from_timestamp=None, to_timestamp=None):
-        """
-        Get historical stock data from Vietstock API
+    def get_raw_history(self, symbol, **params):
+
+        params['symbol'] = symbol
+        if 'to' not in params:
+            params['to'] = datetime.now().timestamp()
+        if 'from' not in params:
+            params['from'] = params['to'] - 86400  # -1d
         
-        Args:
-            symbol: Stock symbol (e.g., 'HPG', 'VNM')
-            resolution: Time resolution (default: '1')
-            from_timestamp: Start timestamp (UNIX timestamp as string)
-            to_timestamp: End timestamp (UNIX timestamp as string)
-            
-        Returns:
-            dict: API response data
-            
-        Raises:
-            httpx.HTTPStatusError: If the request fails
-        """
-        params = {
-            'symbol': symbol,
-            'resolution': resolution
-        }
-        
-        if from_timestamp:
-            params['from'] = from_timestamp
-        
-        if to_timestamp:
-            params['to'] = to_timestamp
-        
-        if self.client is None:
+        if self._client is None:
             raise RuntimeError("Client not initialized. Use VietstockConnector as context manager.")
         
-        response = self.client.get(
-            self._base_url,
-            params=params,
-            headers=self._default_headers
-        )
+        response = self._client.get(self._base_url, params=params, headers=self._default_headers)
         response.raise_for_status()
         
         return response.json()
 
-
-class VietstockAsyncConnector:
-    """Async connector for Vietstock API to download stock market data"""
-    
-    _base_url = "https://api.vietstock.vn/tvnew/history"
-    _default_headers = {
-        'Accept': '*/*',
-        'Origin': 'https://stockchart.vietstock.vn',
-        'Referer': 'https://stockchart.vietstock.vn/',
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36'
-    }
-    
-    def __init__(self, timeout=30.0):
-        """
-        Initialize Vietstock async connector
-        
-        Args:
-            timeout: Request timeout in seconds (default: 30.0)
-        """
-        self.timeout = timeout
-        self.client = None
-    
-    async def __aenter__(self):
-        """Async context manager entry"""
-        self.client = httpx.AsyncClient(timeout=self.timeout)
-        return self
-    
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit"""
-        if self.client:
-            await self.client.aclose()
-    
-    async def get_history(self, symbol, resolution='1', from_timestamp=None, to_timestamp=None):
-        """
-        Get historical stock data from Vietstock API (async)
-        
-        Args:
-            symbol: Stock symbol (e.g., 'HPG', 'VNM')
-            resolution: Time resolution (default: '1')
-            from_timestamp: Start timestamp (UNIX timestamp as string)
-            to_timestamp: End timestamp (UNIX timestamp as string)
-            
-        Returns:
-            dict: API response data
-            
-        Raises:
-            httpx.HTTPStatusError: If the request fails
-        """
-        params = {
-            'symbol': symbol,
-            'resolution': resolution
-        }
-        
-        if from_timestamp:
-            params['from'] = from_timestamp
-        
-        if to_timestamp:
-            params['to'] = to_timestamp
-        
-        if self.client is None:
-            raise RuntimeError("Client not initialized. Use VietstockAsyncConnector as async context manager.")
-        
-        response = await self.client.get(
-            self._base_url,
-            params=params,
-            headers=self._default_headers
-        )
-        response.raise_for_status()
-        
-        return response.json()
+    def get_history(self, symbol, **params):
+        raw = self.get_raw_history(symbol, **params)
+        return self._parser.parse(raw, symbol=symbol)
 

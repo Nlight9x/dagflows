@@ -9,12 +9,13 @@ See securities_table_schema.sql for the table schema.
 from airflow.sdk import DAG
 from airflow.providers.standard.operators.python import PythonOperator
 from airflow.sdk import Variable
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, time as dt_time
 import pendulum
 import json
 import os
 import time
 import shutil
+import pandas as pd
 
 from utils.market_data_connector import VietstockConnector
 from utils.storage_exporter import ClickHouseExporter
@@ -30,22 +31,32 @@ DEFAULT_DAG_CONFIG = {
     "export_batch_size": 1000,
 }
 
-
-class DateTimeEncoder(json.JSONEncoder):
-    """Custom JSON encoder to handle datetime and date objects"""
-    def default(self, obj):
-        if isinstance(obj, datetime):
-            return obj.isoformat()
-        if isinstance(obj, date):
-            return obj.isoformat()
-        return super().default(obj)
+TRADING_SESSIONS = [
+    (dt_time(9, 15), dt_time(11, 30)),
+    (dt_time(13, 0), dt_time(14, 45)),
+]
 
 
 def _get_data_date(**context):
-    """Get the data date from context (previous day)"""
+    """Get trading date from Airflow context"""
     logical_date = context.get('logical_date') if 'logical_date' in context else datetime.now()
-    # return (logical_date - timedelta(days=1)).date()
     return logical_date.date()
+
+def _get_data_dir(dag_config, execution_date):
+    shared_root = dag_config.get('shared_root')
+    shared_subdir = dag_config.get('shared_subdir')
+    date_str = execution_date.strftime("%Y-%m-%d")
+    return os.path.join(shared_root, shared_subdir, date_str) if shared_root and shared_subdir else None
+
+def _to_interval_label(interval_minutes):
+    if interval_minutes <= 1:
+        return "1m"
+    elif interval_minutes % 1440 == 0:
+        return f"{interval_minutes // 1440}d"
+    elif interval_minutes % 60 == 0:
+        return f"{interval_minutes // 60}h"
+    else:
+        return f"{interval_minutes}m"
 
 
 def load_dag_config():
@@ -153,60 +164,23 @@ def download_securities_data(dag_config, **context):
                 print(f"[{idx + 1}/{len(symbols)}] Downloading {symbol} from Vietstock...")
 
                 try:
-                    data = connector.get_history(
+                    df = connector.get_history(
                         symbol=symbol,
                         resolution=resolution,
                         from_timestamp=from_timestamp,
-                        to_timestamp=to_timestamp
+                        to_timestamp=to_timestamp,
                     )
 
-                    standardized_data = []
-
-                    if isinstance(data, dict) and 't' in data:
-                        timestamps = data.get('t', [])
-                        opens = data.get('o', [])
-                        highs = data.get('h', [])
-                        lows = data.get('l', [])
-                        closes = data.get('c', [])
-                        volumes = data.get('v', [])
-
-                        for i, ts in enumerate(timestamps):
-                            dt = datetime.fromtimestamp(ts)
-                            standardized_data.append({
-                                'symbol': symbol,
-                                'timestamp': ts,
-                                'datetime': dt,
-                                'open': opens[i] if i < len(opens) else None,
-                                'high': highs[i] if i < len(highs) else None,
-                                'low': lows[i] if i < len(lows) else None,
-                                'close': closes[i] if i < len(closes) else None,
-                                'volume': volumes[i] if i < len(volumes) else None,
-                                'date': dt.date()
-                            })
-                    elif isinstance(data, list):
-                        day_value = datetime.strptime(date_str, '%Y-%m-%d').date()
-                        for item in data:
-                            standardized_data.append({**item, 'symbol': symbol, 'date': day_value})
-                    else:
-                        print(f"Warning: Unexpected data format for {symbol}, skipping")
-                        standardized_data = []
-
-                    output_filename = f"{symbol}_{date_str}.json"
+                    output_filename = f"{symbol}_{date_str}.csv"
                     output_path = os.path.join(data_dir, output_filename)
 
-                    with open(output_path, 'w', encoding='utf-8') as f:
-                        json.dump(standardized_data, f, ensure_ascii=False, indent=2, cls=DateTimeEncoder)
+                    df.to_csv(output_path, index=False)
 
-                    record_count = len(standardized_data)
+                    record_count = len(df)
                     print(f"[{idx + 1}/{len(symbols)}] Saved {symbol}: {output_path} ({record_count} records)")
 
                     downloaded_files.append({
-                        'symbol': symbol,
-                        'source': 'vietstock',
-                        'file_path': output_path,
-                        'record_count': record_count,
-                        'status': 'success'
-                    })
+                        'symbol': symbol, 'source': 'vietstock', 'file_path': output_path, 'record_count': record_count, 'status': 'success' })
 
                     vietstock_success = True
 
@@ -217,13 +191,7 @@ def download_securities_data(dag_config, **context):
                 except Exception as e:
                     print(f"Error downloading {symbol} from Vietstock: {e}")
                     downloaded_files.append({
-                        'symbol': symbol,
-                        'source': 'vietstock',
-                        'file_path': None,
-                        'record_count': 0,
-                        'status': 'failed',
-                        'error': str(e)
-                    })
+                        'symbol': symbol, 'source': 'vietstock', 'file_path': None, 'record_count': 0, 'status': 'failed', 'error': str(e) })
 
     except Exception as e:
         print(f"VietstockConnector failed: {e}")
@@ -248,54 +216,47 @@ def download_securities_data(dag_config, **context):
     return metadata
 
 
-def aggregate_minute_records(records, interval_minutes):
-    """
-    Aggregate 1-minute OHLCV records to N-minute bars.
-    - records: list of dicts with keys: timestamp, open, high, low, close, volume
-    - interval_minutes: int (e.g., 5, 15, 60)
-    Returns list of tuples (window_start_ts, agg_dict)
-    """
-    if not records:
-        return []
-    window_sec = int(interval_minutes) * 60
-    windows = {}
-    for r in records:
-        ts = int(r.get('timestamp'))
-        win_start = (ts // window_sec) * window_sec
-        if win_start not in windows:
-            windows[win_start] = {
-                'open': r.get('open'),
-                'high': r.get('high'),
-                'low': r.get('low'),
-                'close': r.get('close'),
-                'volume': r.get('volume') or 0,
-                '_first_ts': ts,
-                '_last_ts': ts
-            }
+def aggregate_minute_records(records: pd.DataFrame, interval_minutes):
+    if records.empty or interval_minutes <= 1:
+        return records.copy()
+
+    df = records.copy()
+
+    if 'datetime' not in df.columns:
+        if 'timestamp' in df.columns:
+            df['datetime'] = pd.to_datetime(df['timestamp'], unit='s')
         else:
-            w = windows[win_start]
-            if ts < w['_first_ts']:
-                w['_first_ts'] = ts
-                w['open'] = r.get('open')
-            if ts >= w['_last_ts']:
-                w['_last_ts'] = ts
-                w['close'] = r.get('close')
-            cur_high = r.get('high')
-            cur_low = r.get('low')
-            if cur_high is not None and (w['high'] is None or cur_high > w['high']):
-                w['high'] = cur_high
-            if cur_low is not None and (w['low'] is None or cur_low < w['low']):
-                w['low'] = cur_low
-            vol = r.get('volume') or 0
-            try:
-                w['volume'] = (w['volume'] or 0) + (vol or 0)
-            except:
-                pass
-    return [(k, windows[k]) for k in sorted(windows.keys())]
+            raise ValueError("Records must include 'datetime' or 'timestamp'.")
+
+    df['datetime'] = pd.to_datetime(df['datetime'])
+    df.sort_values('datetime', inplace=True)
+    df.set_index('datetime', inplace=True)
+
+    for col in ['open', 'high', 'low', 'close', 'volume']:
+        if col not in df.columns:
+            df[col] = None
+
+    resampled = df.resample(f'{interval_minutes}T').agg({
+        'open': 'first',
+        'high': 'max',
+        'low': 'min',
+        'close': 'last',
+        'volume': 'sum'
+    })
+
+    resampled.reset_index(inplace=True)
+    resampled['timestamp'] = (resampled['datetime'].view('int64') // 10**9).astype(int)
+
+    return resampled[['datetime', 'timestamp', 'open', 'high', 'low', 'close', 'volume']]
 
 
-def export_records_to_clickhouse(records, table_name, clickhouse_config, batch_size=1000):
-    """Export a list of dict records to ClickHouse table using ClickHouseExporter"""
+def export_records_to_clickhouse(records_df: pd.DataFrame, table_name, clickhouse_config, batch_size=1000):
+    """Export a dataframe to ClickHouse table using ClickHouseExporter"""
+    if records_df is None or records_df.empty:
+        return {'exported_records': 0, 'status': 'skipped'}
+
+    records = records_df.to_dict(orient='records')
+
     cfg = dict(clickhouse_config)
     cfg['table_name'] = table_name
     exporter = ClickHouseExporter(**cfg)
@@ -311,57 +272,11 @@ def export_records_to_clickhouse(records, table_name, clickhouse_config, batch_s
         exporter.close()
 
 
-def parse_records_types(records):
-    """
-    Normalize types for records loaded from JSON:
-    - Convert 'datetime' strings to datetime objects (fallback to 'timestamp')
-    - Convert 'date' strings to date objects (fallback to from 'datetime')
-    Mutates the input list in place and also returns it for convenience.
-    """
-    if not records:
-        return records
-    for rec in records:
-        # datetime
-        if 'datetime' in rec and isinstance(rec['datetime'], str):
-            try:
-                rec['datetime'] = datetime.fromisoformat(rec['datetime'].replace('Z', '+00:00'))
-            except:
-                try:
-                    rec['datetime'] = datetime.strptime(rec['datetime'], '%Y-%m-%dT%H:%M:%S')
-                except:
-                    if 'timestamp' in rec:
-                        rec['datetime'] = datetime.fromtimestamp(rec['timestamp'])
-        # date
-        if 'date' in rec and isinstance(rec['date'], str):
-            try:
-                rec['date'] = datetime.strptime(rec['date'], '%Y-%m-%d').date()
-            except:
-                if 'datetime' in rec and isinstance(rec['datetime'], datetime):
-                    rec['date'] = rec['datetime'].date()
-    return records
-
-
 def push_to_clickhouse(interval_minutes, table_name, dag_config, **context):
     """Push securities data to ClickHouse using DAG configuration"""
     execution_date = _get_data_date(**context)
     date_str = execution_date.strftime("%Y-%m-%d")
-
-    original_interval = interval_minutes
-    effective_interval = None
-    if interval_minutes is not None:
-        interval_minutes = int(interval_minutes)
-        if interval_minutes <= 1:
-            interval_desc = "1m"
-        else:
-            effective_interval = interval_minutes
-            if interval_minutes % 1440 == 0:
-                interval_desc = f"{interval_minutes // 1440}d"
-            elif interval_minutes % 60 == 0:
-                interval_desc = f"{interval_minutes // 60}h"
-            else:
-                interval_desc = f"{interval_minutes}m"
-    else:
-        interval_desc = "1m"
+    interval_label = _to_interval_label(interval_minutes)
 
     clickhouse_config = dag_config.get('clickhouse')
     if isinstance(clickhouse_config, str):
@@ -369,35 +284,24 @@ def push_to_clickhouse(interval_minutes, table_name, dag_config, **context):
     if not isinstance(clickhouse_config, dict) or not clickhouse_config:
         raise ValueError("ClickHouse configuration missing in DAG config variable")
 
-    shared_root = dag_config.get('shared_root', '/opt/airflow/shared')
-    shared_subdir = dag_config.get('shared_subdir', 'stock')
-    data_dir = os.path.join(shared_root, shared_subdir, date_str)
+    data_dir = _get_data_dir(dag_config, execution_date)
 
-    if not os.path.exists(data_dir):
-        raise FileNotFoundError(f"Data directory not found: {data_dir}. Please run download task first.")
+    # if not data_dir or not os.path.exists(data_dir):
+    #     raise FileNotFoundError(f"Data directory not found: {data_dir}. Please run download task first.")
 
-    metadata_path = os.path.join(data_dir, "metadata.json")
-    if os.path.exists(metadata_path):
-        with open(metadata_path, 'r', encoding='utf-8') as f:
-            metadata = json.load(f)
-    else:
-        metadata = {'downloaded_files': []}
-        for filename in os.listdir(data_dir):
-            if filename.endswith('.json') and filename != 'metadata.json':
-                symbol = filename.replace(f'_{date_str}.json', '')
-                metadata['downloaded_files'].append({
-                    'symbol': symbol,
-                    'file_path': os.path.join(data_dir, filename),
-                    'status': 'success'
-                })
+    metadata_path = os.path.join(data_dir, "metadata.json") if data_dir else None
+    if not metadata_path or not os.path.exists(metadata_path):
+        raise FileNotFoundError(f"Metadata file not found: {metadata_path}. Please run download task first.")
 
-    print(f"Pushing {interval_desc} data to ClickHouse table: {table_name}")
+    with open(metadata_path, 'r', encoding='utf-8') as f:
+        metadata = json.load(f)
+
+    print(f"Pushing {interval_label} data to ClickHouse table: {table_name}")
     print(f"Data directory: {data_dir}")
     print(f"Found {len(metadata['downloaded_files'])} files to process")
 
     total_exported = 0
     results = []
-    date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
 
     for file_info in metadata['downloaded_files']:
         if file_info.get('status') != 'success':
@@ -408,46 +312,41 @@ def push_to_clickhouse(interval_minutes, table_name, dag_config, **context):
         symbol = file_info.get('symbol', 'UNKNOWN')
 
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            if not data:
+            if not file_path.endswith('.csv'):
+                print(f"Skipping non-CSV file: {file_path}")
                 continue
 
-            parse_records_types(data)
+            df = pd.read_csv(file_path, parse_dates=['datetime'], usecols=lambda col: col != 'date' )
+            if df.empty or df['datetime'].isna().any():
+                print(f"Skipping file due to invalid datetime values: {file_path}")
+                continue
 
-            if effective_interval and effective_interval > 0:
-                windows = aggregate_minute_records(data, effective_interval)
-                records_to_export = [{
-                    'symbol': symbol,
-                    'timestamp': win_start,
-                    'datetime': datetime.fromtimestamp(win_start),
-                    'open': w.get('open'),
-                    'high': w.get('high'),
-                    'low': w.get('low'),
-                    'close': w.get('close'),
-                    'volume': w.get('volume'),
-                    'date': date_obj
-                } for win_start, w in windows]
-            else:
-                records_to_export = data
+            if 'timestamp' not in df.columns:
+                df['timestamp'] = (df['datetime'].view('int64') // 10**9).astype(int)
 
-            if not records_to_export:
+            records_df = aggregate_minute_records(df, interval_minutes)
+            if records_df.empty:
+                continue
+            records_df['symbol'] = symbol
+            records_df['date'] = records_df['datetime'].dt.date
+
+            if records_df.empty:
                 continue
 
             batch_size = int(dag_config.get('export_batch_size', 1000))
-            result = export_records_to_clickhouse(records_to_export, table_name, clickhouse_config, batch_size=batch_size)
+            result = export_records_to_clickhouse(records_df, table_name, clickhouse_config, batch_size=batch_size)
             exported_count = result.get('exported_records', 0)
             total_exported += exported_count
-            print(f"Exported {exported_count} {interval_desc} records for {symbol} -> {table_name}")
+            print(f"Exported {exported_count} {interval_label} records for {symbol} -> {table_name}")
             results.append({'symbol': symbol, 'exported_records': exported_count, 'status': 'success'})
 
         except Exception as e:
-            print(f"Error processing {interval_desc} data for {symbol}: {e}")
+            print(f"Error processing {interval_label} data for {symbol}: {e}")
             results.append({'symbol': symbol, 'exported_records': 0, 'status': 'failed', 'error': str(e)})
 
     summary = {
         'date': date_str,
-        'interval_minutes': original_interval,
+        'interval_minutes': interval_minutes,
         'table': table_name,
         'total_exported': total_exported,
         'processed_symbols': len(results),
@@ -455,10 +354,10 @@ def push_to_clickhouse(interval_minutes, table_name, dag_config, **context):
         'failed_count': sum(1 for r in results if r.get('status') == 'failed'),
         'results': results
     }
-    print(f"{interval_desc} Summary: Exported {total_exported} records to ClickHouse table '{table_name}'")
+    print(f"{interval_label} Summary: Exported {total_exported} records to ClickHouse table '{table_name}'")
     return summary
 
-# Set timezone
+# Set timezone_default_time_sessions
 local_tz = pendulum.timezone("Asia/Ho_Chi_Minh")
 
 # Define the DAG
@@ -466,7 +365,7 @@ with DAG(
     dag_display_name="Securities Daily Update",
     dag_id=DAG_ID,
     start_date=datetime(2025, 1, 1, tzinfo=local_tz),
-    schedule="30 15 * * *",  # Daily at 3:00 PM (after market close)
+    schedule="30 15 * * *",  # Daily at 15:30 (after market close)
     catchup=False,
     # tags=["securities", "clickhouse", "daily"],
 ) as dag:
@@ -489,28 +388,17 @@ with DAG(
         if table_name is None:
             raise ValueError("Each interval config must include 'table_name'.")
 
-        if minutes <= 1:
-            interval_label = "1m"
-        elif minutes % 1440 == 0:
-            interval_label = f"{minutes // 1440}d"
-        elif minutes % 60 == 0:
-            interval_label = f"{minutes // 60}h"
-        else:
-            interval_label = f"{minutes}m"
-
-        task = PythonOperator(
-            task_display_name=f"Push {interval_label} Stock Data to ClickHouse",
-            task_id=f"push_stock_{interval_label.lower()}_to_clickhouse",
-            python_callable=push_to_clickhouse,
-            op_kwargs={
-                'interval_minutes': minutes,
-                'table_name': table_name,
-                'dag_config': dag_config,
-            },
-            retries=3,
-            retry_delay=timedelta(minutes=2),
+        interval_label = _to_interval_label(minutes)
+        push_tasks.append(
+            PythonOperator(
+                task_display_name=f"Push {interval_label} Stock Data to ClickHouse",
+                task_id=f"push_stock_{interval_label.lower()}_to_clickhouse",
+                python_callable=push_to_clickhouse,
+                op_kwargs={'interval_minutes': minutes, 'table_name': table_name, 'dag_config': dag_config},
+                retries=3,
+                retry_delay=timedelta(minutes=2),
+            )
         )
-        push_tasks.append(task)
 
     download_task >> push_tasks
 

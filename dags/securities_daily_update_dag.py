@@ -165,11 +165,7 @@ def download_securities_data(dag_config, **context):
 
                 try:
                     df = connector.get_history(
-                        symbol=symbol,
-                        resolution=resolution,
-                        from_timestamp=from_timestamp,
-                        to_timestamp=to_timestamp,
-                    )
+                        symbol=symbol, resolution=resolution, from_timestamp=from_timestamp, to_timestamp=to_timestamp)
 
                     output_filename = f"{symbol}_{date_str}.csv"
                     output_path = os.path.join(data_dir, output_filename)

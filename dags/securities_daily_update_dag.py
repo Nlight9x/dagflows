@@ -318,7 +318,7 @@ def push_to_clickhouse(interval_minutes, table_name, dag_config, **context):
                 print(f"Skipping non-CSV file: {file_path}")
                 continue
 
-            df = pd.read_csv(file_path, parse_dates=['datetime'], usecols=lambda col: col != 'date' )
+            df = pd.read_csv(file_path, parse_dates=['datetime'], usecols=lambda col: col != 'date')
             if df.empty or df['datetime'].isna().any():
                 print(f"Skipping file due to invalid datetime values: {file_path}")
                 continue
@@ -334,7 +334,8 @@ def push_to_clickhouse(interval_minutes, table_name, dag_config, **context):
 
             if records_df.empty:
                 continue
-
+            
+            print(records_df)
             batch_size = int(dag_config.get('export_batch_size', 1000))
             result = export_records_to_clickhouse(records_df, table_name, clickhouse_config, batch_size=batch_size)
             exported_count = result.get('exported_records', 0)

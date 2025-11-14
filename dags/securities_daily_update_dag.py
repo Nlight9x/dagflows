@@ -42,11 +42,13 @@ def _get_data_date(**context):
     logical_date = context.get('logical_date') if 'logical_date' in context else datetime.now()
     return logical_date.date()
 
+
 def _get_data_dir(dag_config, execution_date):
     shared_root = dag_config.get('shared_root')
     shared_subdir = dag_config.get('shared_subdir')
     date_str = execution_date.strftime("%Y-%m-%d")
     return os.path.join(shared_root, shared_subdir, date_str) if shared_root and shared_subdir else None
+
 
 def _to_interval_label(interval_minutes):
     if interval_minutes <= 1:

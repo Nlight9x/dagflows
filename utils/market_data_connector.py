@@ -60,7 +60,7 @@ class VietstockParser(SecuritiesPriceParser):
 
         df['timestamp'] = df['timestamp'].astype(int)
         df['datetime'] = pd.to_datetime(df['timestamp'], unit='s', utc=True)\
-            .dt.tz_convert(LOCAL_TZ).dt.tz_localize(None)
+            .dt.tz_convert(self._local_tz).dt.tz_localize(None)
         df.sort_values('datetime', inplace=True)
 
         if 'symbol' not in df.columns:

@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 class SecuritiesPriceParser:
 
-    _default_time_sessions = [(time(9, 15), time(11, 30)),  (time(13, 0), time(14, 45))]
+    _default_time_sessions = [(time(9, 15), time(11, 30)), (time(13, 0), time(14, 30)), (time(14, 45), time(14, 45))]
     _local_tz = ZoneInfo("Asia/Ho_Chi_Minh")
 
     def __init__(self,  **config):

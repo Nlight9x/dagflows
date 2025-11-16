@@ -345,7 +345,7 @@ with DAG(
     schedule="0 15 * * *",  # Daily at 15:00 (after market close)
     catchup=False,
 ) as dag:
-    DAG_CONFIG_VAR_NAME = f"{dag.dag_id}_config"
+    DAG_CONFIG_VAR_NAME = f"dag_config_{dag.dag_id}"
     dag_config = _load_dag_config(DAG_CONFIG_VAR_NAME)
     interval_defs = dag_config.get('intervals', [])
 

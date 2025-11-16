@@ -20,6 +20,7 @@ def _get_data_date(**context):
     logical_date = context.get('logical_date') if 'logical_date' in context else datetime.now()
     return (logical_date - timedelta(days=1)).date()
 
+
 def download_and_export_csv_affiliate_data(**context):
     secret_key = Variable.get("affiliate_secret_key")
     output_path = os.path.join(os.path.dirname(__file__), "../data/affiliate_data.csv")

@@ -20,8 +20,6 @@ import pandas as pd
 from utils.market_data_connector import VietstockConnector
 from utils.storage_exporter import ClickHouseExporter
 
-DAG_ID = "securities_daily_update"
-DAG_CONFIG_VAR_NAME = f"{DAG_ID}_config"
 
 DEFAULT_DAG_CONFIG = {
     "shared_root": "/opt/airflow/shared",
@@ -30,11 +28,6 @@ DEFAULT_DAG_CONFIG = {
     "download_wait_seconds": 2,
     "export_batch_size": 1000,
 }
-
-TRADING_SESSIONS = [
-    (dt_time(9, 15), dt_time(11, 30)),
-    (dt_time(13, 0), dt_time(14, 45)),
-]
 
 
 def _get_data_date(**context):
@@ -61,14 +54,14 @@ def _to_interval_label(interval_minutes):
         return f"{interval_minutes}m"
 
 
-def load_dag_config():
-    raw_config = Variable.get(DAG_CONFIG_VAR_NAME, default=None)
+def _load_dag_config(config_var_name):
+    raw_config = Variable.get(config_var_name, default=None)
     if raw_config is None:
-        raise ValueError(f"Airflow Variable '{DAG_CONFIG_VAR_NAME}' is not set. Please create it with DAG configuration.")
+        raise ValueError(f"Airflow Variable '{config_var_name}' is not set. Please create it with DAG configuration.")
     try:
         cfg = json.loads(raw_config) if isinstance(raw_config, str) else raw_config
     except Exception as exc:
-        raise ValueError(f"Failed to parse DAG config from Variable '{DAG_CONFIG_VAR_NAME}': {exc}")
+        raise ValueError(f"Failed to parse DAG config from Variable '{config_var_name}': {exc}")
 
     if not isinstance(cfg, dict):
         raise ValueError(f"DAG config must be a JSON object. Got: {type(cfg)}")
@@ -99,10 +92,12 @@ def load_dag_config():
     return merged
 
 
-def cleanup_old_shared_data(shared_root, shared_subdir, current_date, keep_days=5):
+def _cleanup_old_shared_data(dag_config, current_date, keep_days=5):
     """Remove data directories older than keep_days"""
     if keep_days <= 0:
         return
+    shared_root = dag_config.get('shared_root')
+    shared_subdir = dag_config.get('shared_subdir')
     base_dir = os.path.join(shared_root, shared_subdir)
     if not os.path.exists(base_dir):
         return
@@ -129,23 +124,14 @@ def download_securities_data(dag_config, **context):
     execution_date = _get_data_date(**context)
     date_str = execution_date.strftime("%Y-%m-%d")
 
-    shared_root = dag_config.get('shared_root')
-    shared_subdir = dag_config.get('shared_subdir')
-    if not shared_root or not shared_subdir:
-        raise ValueError("DAG config must include 'shared_root' and 'shared_subdir'.")
-
-    symbols = dag_config.get('symbols')
-    if not isinstance(symbols, list) or len(symbols) == 0:
-        raise ValueError("DAG config must include non-empty 'symbols' list.")
-
     keep_days = int(dag_config.get('keep_days', 5))
     wait_seconds = float(dag_config.get('download_wait_seconds', 2))
 
-    shared_dir = os.path.join(shared_root, shared_subdir)
-    data_dir = os.path.join(shared_dir, date_str)
-    os.makedirs(shared_dir, exist_ok=True)
+    data_dir = _get_data_dir(dag_config, execution_date)
     os.makedirs(data_dir, exist_ok=True)
-    cleanup_old_shared_data(shared_root, shared_subdir, execution_date, keep_days=keep_days)
+    _cleanup_old_shared_data(dag_config, execution_date, keep_days=keep_days)
+
+    symbols = dag_config.get('symbols')
 
     resolution = "1"
 
@@ -159,42 +145,35 @@ def download_securities_data(dag_config, **context):
     print(f"Output directory: {data_dir}")
 
     downloaded_files = []
-    vietstock_success = False
-    try:
-        with VietstockConnector(timeout=30.0) as connector:
-            for idx, symbol in enumerate(symbols):
-                print(f"[{idx + 1}/{len(symbols)}] Downloading {symbol} from Vietstock...")
+    with VietstockConnector(timeout=30.0) as connector:
+        for idx, symbol in enumerate(symbols):
+            print(f"[{idx + 1}/{len(symbols)}] Downloading {symbol} from Vietstock...")
 
-                try:
-                    df = connector.get_history(
-                        symbol=symbol, resolution=resolution, from_timestamp=from_timestamp, to_timestamp=to_timestamp)
+            try:
+                df = connector.get_history(
+                    symbol=symbol, resolution=resolution, from_timestamp=from_timestamp, to_timestamp=to_timestamp)
 
-                    output_filename = f"{symbol}_{date_str}.csv"
-                    output_path = os.path.join(data_dir, output_filename)
+                output_filename = f"{symbol}_{date_str}.csv"
+                output_path = os.path.join(data_dir, output_filename)
 
-                    df.to_csv(output_path, index=False)
+                df.to_csv(output_path, index=False)
 
-                    record_count = len(df)
-                    print(f"[{idx + 1}/{len(symbols)}] Saved {symbol}: {output_path} ({record_count} records)")
+                record_count = len(df)
+                print(f"[{idx + 1}/{len(symbols)}] Saved {symbol}: {output_path} ({record_count} records)")
 
-                    downloaded_files.append({
-                        'symbol': symbol, 'source': 'vietstock', 'file_path': output_path, 'record_count': record_count, 'status': 'success' })
+                downloaded_files.append({
+                    'symbol': symbol, 'source': 'vietstock', 'file_path': output_path, 'record_count': record_count,
+                    'status': 'success'})
 
-                    vietstock_success = True
+                if idx < len(symbols) - 1 and wait_seconds > 0:
+                    print(f"Waiting {wait_seconds} seconds before next request...")
+                    time.sleep(wait_seconds)
 
-                    if idx < len(symbols) - 1 and wait_seconds > 0:
-                        print(f"Waiting {wait_seconds} seconds before next request...")
-                        time.sleep(wait_seconds)
-
-                except Exception as e:
-                    print(f"Error downloading {symbol} from Vietstock: {e}")
-                    downloaded_files.append({
-                        'symbol': symbol, 'source': 'vietstock', 'file_path': None, 'record_count': 0, 'status': 'failed', 'error': str(e) })
-
-    except Exception as e:
-        print(f"VietstockConnector failed: {e}")
-        if not vietstock_success:
-            raise
+            except Exception as e:
+                print(f"Error downloading {symbol} from Vietstock: {e}")
+                downloaded_files.append({
+                    'symbol': symbol, 'source': 'vietstock', 'file_path': None, 'record_count': 0, 'status': 'failed',
+                    'error': str(e)})
 
     metadata_path = os.path.join(data_dir, "metadata.json")
     metadata = {
@@ -207,10 +186,9 @@ def download_securities_data(dag_config, **context):
 
     with open(metadata_path, 'w', encoding='utf-8') as f:
         json.dump(metadata, f, ensure_ascii=False, indent=2)
+        print(f"Metadata saved to: {metadata_path}")
 
     print(f"Successfully downloaded data for {metadata['success_count']}/{len(symbols)} symbol(s)")
-    print(f"Metadata saved to: {metadata_path}")
-
     return metadata
 
 
@@ -355,23 +333,24 @@ def push_to_clickhouse(interval_minutes, table_name, dag_config, **context):
     print(f"{interval_label} Summary: Exported {total_exported} records to ClickHouse table '{table_name}'")
     return summary
 
+
 # Set timezone_default_time_sessions
 local_tz = pendulum.timezone("Asia/Ho_Chi_Minh")
 
 # Define the DAG
 with DAG(
-    dag_display_name="Securities Daily Update",
-    dag_id=DAG_ID,
+    dag_display_name="[Securities] Daily Update Stock Price ",
+    dag_id='daily_update_stock_price',
     start_date=datetime(2025, 1, 1, tzinfo=local_tz),
-    schedule="30 15 * * *",  # Daily at 15:30 (after market close)
+    schedule="0 15 * * *",  # Daily at 15:00 (after market close)
     catchup=False,
-    # tags=["securities", "clickhouse", "daily"],
 ) as dag:
-    dag_config = load_dag_config()
+    DAG_CONFIG_VAR_NAME = f"{dag.dag_id}_config"
+    dag_config = _load_dag_config(DAG_CONFIG_VAR_NAME)
     interval_defs = dag_config.get('intervals', [])
 
     download_task = PythonOperator(
-        task_display_name="Download Securities Data",
+        task_display_name="Download Stock Data",
         task_id="download_securities_data",
         python_callable=download_securities_data,
         op_kwargs={'dag_config': dag_config},
@@ -400,3 +379,44 @@ with DAG(
 
     download_task >> push_tasks
 
+
+# with DAG(
+#     dag_display_name="[Securities] Daily Update Derivative Price ",
+#     dag_id='daily_update_stock_price',
+#     start_date=datetime(2025, 1, 1, tzinfo=local_tz),
+#     schedule="0 15 * * *",  # Daily at 15:00 (after market close)
+#     catchup=False,
+# ) as dag:
+#     DAG_CONFIG_VAR_NAME = f"{dag.dag_id}_config"
+#     dag_config = _load_dag_config(DAG_CONFIG_VAR_NAME)
+#     interval_defs = dag_config.get('intervals', [])
+#
+#     download_task = PythonOperator(
+#         task_display_name="Download Derivative Data",
+#         task_id="download_securities_data",
+#         python_callable=download_securities_data,
+#         op_kwargs={'dag_config': dag_config},
+#         retries=3,
+#         retry_delay=timedelta(minutes=5),
+#     )
+#
+#     push_tasks = []
+#     for interval_def in interval_defs:
+#         minutes = int(interval_def.get('minutes'))
+#         table_name = interval_def.get('table_name')
+#         if table_name is None:
+#             raise ValueError("Each interval config must include 'table_name'.")
+#
+#         interval_label = _to_interval_label(minutes)
+#         push_tasks.append(
+#             PythonOperator(
+#                 task_display_name=f"Push {interval_label} Stock Data to ClickHouse",
+#                 task_id=f"push_stock_{interval_label.lower()}_to_clickhouse",
+#                 python_callable=push_to_clickhouse,
+#                 op_kwargs={'interval_minutes': minutes, 'table_name': table_name, 'dag_config': dag_config},
+#                 retries=3,
+#                 retry_delay=timedelta(minutes=2),
+#             )
+#         )
+#
+#     download_task >> push_tasks

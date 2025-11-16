@@ -9,7 +9,8 @@ See securities_table_schema.sql for the table schema.
 from airflow.sdk import DAG
 from airflow.providers.standard.operators.python import PythonOperator
 from airflow.sdk import Variable
-from datetime import datetime, timedelta, time as dt_time
+from datetime import datetime, timedelta
+import dateutil.relativedelta
 import pendulum
 import json
 import os
@@ -114,6 +115,44 @@ def _cleanup_old_shared_data(dag_config, current_date, keep_days=5):
         if dir_date < cutoff_date:
             shutil.rmtree(dir_path, ignore_errors=True)
             print(f"Removed old data directory: {dir_path}")
+
+
+def _get_symbol_ticket_of_vn30d(due_month=0):
+    now = datetime.now()
+    # Tìm ngày thứ 5 lần thứ 3 trong tháng hiện tại
+    first_day = now.replace(day=1)
+    weekday_count = 0
+    expiry_day = None
+    for i in range(31):
+        d = first_day + timedelta(days=i)
+        if d.month != now.month:
+            break
+        if d.weekday() == 3:  # Thứ 5 (Monday=0)
+            weekday_count += 1
+            if weekday_count == 3:
+                expiry_day = d
+                break
+    # Nếu đã qua ngày đáo hạn, chuyển sang tháng sau
+    if now.date() > expiry_day.date():
+        base_month = now + dateutil.relativedelta.relativedelta(months=1)
+    else:
+        base_month = now
+    # Cộng thêm due_month nếu có
+    base_month = base_month + dateutil.relativedelta.relativedelta(months=due_month)
+    year = base_month.year
+    month = base_month.month
+    # Map năm sang ký tự quy ước
+    year_map = "ABCDEFGHIJKLMNPQRSTVWXYZ0123456789"
+    base_year = 2020
+    year_idx = (year - base_year) % len(year_map)
+    year_code = year_map[year_idx]
+    # Map tháng sang ký tự quy ước (1-9, A, B, C)
+    if 1 <= month <= 9:
+        month_code = str(month)
+    else:
+        month_code = chr(ord('A') + (month - 10))  # 10->A, 11->B, 12->C
+    symbol = f"41I1{year_code}{month_code}000"
+    return symbol
 
 
 def download_securities_data(dag_config, **context):
@@ -342,7 +381,7 @@ with DAG(
     dag_display_name="[Securities] Daily Update Stock Price ",
     dag_id='daily_update_stock_price',
     start_date=datetime(2025, 1, 1, tzinfo=local_tz),
-    schedule="0 15 * * *",  # Daily at 15:00 (after market close)
+    schedule="0 15 * * 1-5",  # Mon-Fri at 15:00 (after market close)
     catchup=False,
 ) as dag:
     DAG_CONFIG_VAR_NAME = f"dag_config_{dag.dag_id}"
@@ -381,10 +420,10 @@ with DAG(
 
 
 # with DAG(
-#     dag_display_name="[Securities] Daily Update Derivative Price ",
-#     dag_id='daily_update_stock_price',
+#     dag_display_name="[Securities] Daily Update VN30 Derivative Index",
+#     dag_id='daily_update_vn30d_index',
 #     start_date=datetime(2025, 1, 1, tzinfo=local_tz),
-#     schedule="0 15 * * *",  # Daily at 15:00 (after market close)
+#     schedule="30 15 * * 1-5",  # Daily at 15:00 (after market close)
 #     catchup=False,
 # ) as dag:
 #     DAG_CONFIG_VAR_NAME = f"{dag.dag_id}_config"
@@ -392,8 +431,8 @@ with DAG(
 #     interval_defs = dag_config.get('intervals', [])
 #
 #     download_task = PythonOperator(
-#         task_display_name="Download Derivative Data",
-#         task_id="download_securities_data",
+#         task_display_name="Download VN30 Derivative Data",
+#         task_id="download_vn30d_data",
 #         python_callable=download_securities_data,
 #         op_kwargs={'dag_config': dag_config},
 #         retries=3,
@@ -410,8 +449,8 @@ with DAG(
 #         interval_label = _to_interval_label(minutes)
 #         push_tasks.append(
 #             PythonOperator(
-#                 task_display_name=f"Push {interval_label} Stock Data to ClickHouse",
-#                 task_id=f"push_stock_{interval_label.lower()}_to_clickhouse",
+#                 task_display_name=f"Push {interval_label} VN30 Derivative Data to ClickHouse",
+#                 task_id=f"push_vn30d_{interval_label.lower()}_to_clickhouse",
 #                 python_callable=push_to_clickhouse,
 #                 op_kwargs={'interval_minutes': minutes, 'table_name': table_name, 'dag_config': dag_config},
 #                 retries=3,

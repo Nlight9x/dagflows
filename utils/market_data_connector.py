@@ -163,12 +163,12 @@ class VietstockConnector(SecuritiesMarketConnector):
         if self._client is None:
             raise RuntimeError("Client not initialized. Use VietstockConnector as context manager.")
 
-        base_resolution = params['resolution']
+        base_resolution = params['resolution'].lower()
         if base_resolution not in self._interval_time_convert_map:
-            raise ValueError(f"Resolution '{base_resolution}' is invalid!")
+            raise ValueError(f"Resolution '{params['resolution']}' is invalid!")
 
         params['symbol'] = symbol
-        params['resolution'] = self._interval_time_convert_map.get(base_resolution.lower())
+        params['resolution'] = self._interval_time_convert_map.get(base_resolution)
         params['to'] = int(datetime.now().timestamp()) if 'to_timestamp' not in params else params.pop('to_timestamp')
         params['from'] = params['to'] - 86400 if 'from_timestamp' not in params else params.pop('from_timestamp')
         

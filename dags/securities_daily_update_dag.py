@@ -26,14 +26,14 @@ DEFAULT_DAG_CONFIG = {
     "mode": "Daily",
     "shared_root": "/opt/airflow/shared",
     "shared_subdir": "stock",
-    "resolution": "1m",
+    "base_resolution": "1m",
     "back_days": 1,
     "data_dir_keep_days": 5,
     "download_wait_seconds": 2,
     "export_batch_size": 1000,
 }
 
-resolution_convert_map = {
+_resolution_convert_map = {
     "1m": 1, "5m": 5, "30m": 30, "1h": 60, "1d": 1440, "1w": 10080
 }
 
@@ -72,8 +72,11 @@ def _to_interval_label(interval_minutes):
         return f"{interval_minutes}m"
 
 
-def _to_interval_minutes(resolution):
-
+def _to_minute_resolution(resolution):
+    resolution = resolution.lower()
+    if resolution not in _resolution_convert_map:
+        raise ValueError(f"Resolution '{resolution}' is invalid!")
+    return _resolution_convert_map[resolution]
 
 
 def _load_dag_config(config_var_name):
@@ -94,6 +97,10 @@ def _load_dag_config(config_var_name):
     symbols = merged.get('symbols')
     if not isinstance(symbols, list) or len(symbols) == 0:
         raise ValueError("DAG config must include non-empty 'symbols' list.")
+
+    base_resolution = merged.get('base_resolution')
+    if base_resolution.lower() not in _resolution_convert_map:
+        raise ValueError(f"Resolution '{base_resolution}' is invalid!")
 
     clickhouse_cfg = merged.get('clickhouse')
     if not isinstance(clickhouse_cfg, dict):
@@ -192,7 +199,7 @@ def download_securities_data(dag_config, **context):
     _cleanup_old_shared_data(dag_config, execution_date, keep_days=keep_days)
 
     symbols = dag_config.get('symbols')
-    resolution = dag_config.get("resolution")
+    resolution = dag_config.get("base_resolution")
 
     from_date, to_date, back_days = _get_data_range_date(dag_config, **context)
     date_str = to_date.strftime("%Y-%m-%d")
@@ -253,8 +260,8 @@ def download_securities_data(dag_config, **context):
     return metadata
 
 
-def aggregate_minute_records(records: pd.DataFrame, interval_minutes):
-    if records.empty or not interval_minutes or interval_minutes <= 1:
+def aggregate_minute_records(records: pd.DataFrame, minute_resolution):
+    if records.empty or not minute_resolution or minute_resolution <= 1:
         return records.copy()
 
     df = records.copy()
@@ -273,7 +280,7 @@ def aggregate_minute_records(records: pd.DataFrame, interval_minutes):
         if col not in df.columns:
             df[col] = None
 
-    resampled = df.resample(f'{interval_minutes}T').agg({
+    resampled = df.resample(f'{minute_resolution}T').agg({
         'open': 'first',
         'high': 'max',
         'low': 'min',
@@ -287,7 +294,7 @@ def aggregate_minute_records(records: pd.DataFrame, interval_minutes):
     return resampled[['datetime', 'timestamp', 'open', 'high', 'low', 'close', 'volume']]
 
 
-def export_records_to_clickhouse(exporter, records_df: pd.DataFrame, table_name, clickhouse_config, batch_size=1000):
+def export_records_to_clickhouse(exporter, records_df: pd.DataFrame, batch_size=1000):
     """Export a dataframe to ClickHouse table using ClickHouseExporter"""
     if records_df is None or records_df.empty:
         return {'exported_records': 0, 'status': 'skipped'}
@@ -304,11 +311,9 @@ def export_records_to_clickhouse(exporter, records_df: pd.DataFrame, table_name,
         exporter.close()
 
 
-def push_to_clickhouse(interval_minutes, table_name, dag_config, **context):
+def push_to_clickhouse(resolution, table_name, dag_config, **context):
     """Push securities data to ClickHouse using DAG configuration"""
-    execution_date = _get_data_date(**context)
-    date_str = execution_date.strftime("%Y-%m-%d")
-    interval_label = _to_interval_label(interval_minutes)
+    from_date, to_date, back_days = _get_data_range_date(dag_config, **context)
 
     clickhouse_config = dag_config.get('clickhouse')
     if isinstance(clickhouse_config, str):
@@ -316,10 +321,7 @@ def push_to_clickhouse(interval_minutes, table_name, dag_config, **context):
     if not isinstance(clickhouse_config, dict) or not clickhouse_config:
         raise ValueError("ClickHouse configuration missing in DAG config variable")
 
-    data_dir = _get_data_dir(dag_config, execution_date)
-
-    # if not data_dir or not os.path.exists(data_dir):
-    #     raise FileNotFoundError(f"Data directory not found: {data_dir}. Please run download task first.")
+    data_dir = _get_data_dir(dag_config, to_date)
 
     metadata_path = os.path.join(data_dir, "metadata.json") if data_dir else None
     if not metadata_path or not os.path.exists(metadata_path):
@@ -328,62 +330,67 @@ def push_to_clickhouse(interval_minutes, table_name, dag_config, **context):
     with open(metadata_path, 'r', encoding='utf-8') as f:
         metadata = json.load(f)
 
-    print(f"Pushing {interval_label} data to ClickHouse table: {table_name}")
-    print(f"Data directory: {data_dir}")
-    print(f"Found {len(metadata['downloaded_files'])} files to process")
-
+    minute_resolution = _to_minute_resolution(resolution)
+    downloaded_resolution = metadata.get('resolution')
     total_exported = 0
     results = []
 
-    clickhouse_config['table_name'] = table_name
-    exporter = ClickHouseExporter(**clickhouse_config)
-    exporter.delete_by_dates([execution_date])
+    if minute_resolution % downloaded_resolution == 0:
+        print(f"Pushing {resolution} data to ClickHouse table: {table_name}")
+        print(f"Data directory: {data_dir}")
+        print(f"Found {len(metadata['downloaded_files'])} files to process")
 
-    for file_info in metadata['downloaded_files']:
-        if file_info.get('status') != 'success':
-            continue
-        file_path = file_info.get('file_path')
-        if not file_path or not os.path.exists(file_path):
-            continue
-        symbol = file_info.get('symbol', 'UNKNOWN')
+        clickhouse_config['table_name'] = table_name
+        exporter = ClickHouseExporter(**clickhouse_config)
+        exporter.delete_by_dates([from_date + timedelta(days=i) for i in range(back_days + 1)])
 
-        try:
-            if not file_path.endswith('.csv'):
-                print(f"Skipping non-CSV file: {file_path}")
+        for file_info in metadata['downloaded_files']:
+            if file_info.get('status') != 'success':
                 continue
-
-            df = pd.read_csv(file_path, parse_dates=['datetime'], usecols=lambda col: col != 'date')
-            if df.empty or df['datetime'].isna().any():
-                print(f"Skipping file due to invalid datetime values: {file_path}")
+            file_path = file_info.get('file_path')
+            if not file_path or not os.path.exists(file_path):
                 continue
+            symbol = file_info.get('symbol', 'UNKNOWN')
 
-            if 'timestamp' not in df.columns:
-                df['timestamp'] = (df['datetime'].view('int64') // 10**9).astype(int)
+            try:
+                if not file_path.endswith('.csv'):
+                    print(f"Skipping non-CSV file: {file_path}")
+                    continue
 
-            records_df = aggregate_minute_records(df, interval_minutes)
-            if records_df.empty:
-                continue
-            records_df['symbol'] = symbol
-            records_df['date'] = records_df['datetime'].dt.date
+                df = pd.read_csv(file_path, parse_dates=['datetime'], usecols=lambda col: col != 'date')
+                if df.empty or df['datetime'].isna().any():
+                    print(f"Skipping file due to invalid datetime values: {file_path}")
+                    continue
 
-            if records_df.empty:
-                continue
-            
-            # print(records_df)
-            batch_size = int(dag_config.get('export_batch_size', 1000))
-            result = export_records_to_clickhouse(exporter, records_df, table_name, clickhouse_config, batch_size=batch_size)
-            exported_count = result.get('exported_records', 0)
-            total_exported += exported_count
-            print(f"Exported {exported_count} {interval_label} records for {symbol} -> {table_name}")
-            results.append({'symbol': symbol, 'exported_records': exported_count, 'status': 'success'})
+                if 'timestamp' not in df.columns:
+                    df['timestamp'] = (df['datetime'].view('int64') // 10**9).astype(int)
 
-        except Exception as e:
-            print(f"Error processing {interval_label} data for {symbol}: {e}")
-            results.append({'symbol': symbol, 'exported_records': 0, 'status': 'failed', 'error': str(e)})
+                records_df = aggregate_minute_records(df, minute_resolution)
+                if records_df.empty:
+                    continue
+                records_df['symbol'] = symbol
+                records_df['date'] = records_df['datetime'].dt.date
+
+                if records_df.empty:
+                    continue
+
+                # print(records_df)
+                batch_size = int(dag_config.get('export_batch_size', 1000))
+                result = export_records_to_clickhouse(exporter, records_df, batch_size=batch_size)
+                exported_count = result.get('exported_records', 0)
+                total_exported += exported_count
+                print(f"Exported {exported_count} {resolution} records for {symbol} -> {table_name}")
+                results.append({'symbol': symbol, 'exported_records': exported_count, 'status': 'success'})
+
+            except Exception as e:
+                print(f"Error processing {resolution} data for {symbol}: {e}")
+                results.append({'symbol': symbol, 'exported_records': 0, 'status': 'failed', 'error': str(e)})
+    else:
+        print(f"Skip processing {resolution} data.")
 
     summary = {
-        'date': date_str,
-        'interval_minutes': interval_minutes,
+        'date': to_date.strftime("%Y-%m-%d"),
+        'resolution': resolution,
         'table': table_name,
         'total_exported': total_exported,
         'processed_symbols': len(results),
@@ -391,7 +398,7 @@ def push_to_clickhouse(interval_minutes, table_name, dag_config, **context):
         'failed_count': sum(1 for r in results if r.get('status') == 'failed'),
         'results': results
     }
-    print(f"{interval_label} Summary: Exported {total_exported} records to ClickHouse table '{table_name}'")
+    print(f"Summary: Exported {total_exported} records to ClickHouse table '{table_name}'")
     return summary
 
 
@@ -408,7 +415,7 @@ with DAG(
 ) as dag:
     DAG_CONFIG_VAR_NAME = f"dag_config_{dag.dag_id}"
     d_config = _load_dag_config(DAG_CONFIG_VAR_NAME)
-    interval_defs = d_config.get('intervals', [])
+    pushing_config_tasks = d_config.get('pushing_config_tasks', [])
 
     download_task = PythonOperator(
         task_display_name="Download Stock Data",
@@ -420,19 +427,17 @@ with DAG(
     )
 
     push_tasks = []
-    for interval_def in interval_defs:
-        minutes = int(interval_def.get('minutes'))
-        table_name = interval_def.get('table_name')
+    for c_task in pushing_config_tasks:
+        resolution = c_task.get('resolution')
+        table_name = c_task.get('table_name')
         if table_name is None:
             raise ValueError("Each interval config must include 'table_name'.")
-
-        interval_label = _to_interval_label(minutes)
         push_tasks.append(
             PythonOperator(
-                task_display_name=f"Push {interval_label} Stock Data to ClickHouse",
-                task_id=f"push_stock_{interval_label.lower()}_to_clickhouse",
+                task_display_name=f"Push {resolution} Stock Data to ClickHouse",
+                task_id=f"push_stock_{resolution.lower()}_to_clickhouse",
                 python_callable=push_to_clickhouse,
-                op_kwargs={'interval_minutes': minutes, 'table_name': table_name, 'dag_config': d_config},
+                op_kwargs={'resolution': resolution, 'table_name': table_name, 'dag_config': d_config},
                 retries=3,
                 retry_delay=timedelta(minutes=2),
             )

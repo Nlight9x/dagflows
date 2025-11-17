@@ -23,24 +23,41 @@ from utils.storage_exporter import ClickHouseExporter
 
 
 DEFAULT_DAG_CONFIG = {
+    "mode": "Daily",
     "shared_root": "/opt/airflow/shared",
     "shared_subdir": "stock",
-    "keep_days": 5,
+    "resolution": "1m",
+    "back_days": 1,
+    "data_dir_keep_days": 5,
     "download_wait_seconds": 2,
     "export_batch_size": 1000,
 }
 
+resolution_convert_map = {
+    "1m": 1, "5m": 5, "30m": 30, "1h": 60, "1d": 1440, "1w": 10080
+}
 
-def _get_data_date(**context):
+
+def _get_data_date(dag_config, **context):
     """Get trading date from Airflow context"""
+    data_date = dag_config.get('data_date')
+    if data_date:
+        return data_date
     logical_date = context.get('logical_date') if 'logical_date' in context else datetime.now()
     return logical_date.date()
 
 
-def _get_data_dir(dag_config, execution_date):
+def _get_data_range_date(dag_config, **context):
+    back_days = int(dag_config.get('back_days'))
+    to_date = _get_data_date(dag_config, **context)
+    from_date = to_date - timedelta(days=back_days)
+    return from_date, to_date, back_days
+
+
+def _get_data_dir(dag_config, data_date):
     shared_root = dag_config.get('shared_root')
     shared_subdir = dag_config.get('shared_subdir')
-    date_str = execution_date.strftime("%Y-%m-%d")
+    date_str = data_date.strftime("%Y-%m-%d")
     return os.path.join(shared_root, shared_subdir, date_str) if shared_root and shared_subdir else None
 
 
@@ -53,6 +70,10 @@ def _to_interval_label(interval_minutes):
         return f"{interval_minutes // 60}h"
     else:
         return f"{interval_minutes}m"
+
+
+def _to_interval_minutes(resolution):
+
 
 
 def _load_dag_config(config_var_name):
@@ -104,12 +125,12 @@ def _cleanup_old_shared_data(dag_config, current_date, keep_days=5):
         return
 
     cutoff_date = current_date - timedelta(days=keep_days - 1)
-    for name in os.listdir(base_dir):
-        dir_path = os.path.join(base_dir, name)
+    for date_dir in os.listdir(base_dir):
+        dir_path = os.path.join(base_dir, date_dir)
         if not os.path.isdir(dir_path):
             continue
         try:
-            dir_date = datetime.strptime(name, '%Y-%m-%d').date()
+            dir_date = datetime.strptime(date_dir, '%Y-%m-%d').date()
         except ValueError:
             continue
         if dir_date < cutoff_date:
@@ -161,9 +182,9 @@ def download_securities_data(dag_config, **context):
     Data is saved to shared folder with standardized format
     """
     execution_date = _get_data_date(**context)
-    date_str = execution_date.strftime("%Y-%m-%d")
+    # date_str = execution_date.strftime("%Y-%m-%d")
 
-    keep_days = int(dag_config.get('keep_days', 5))
+    keep_days = int(dag_config.get('data_dir_keep_days', 5))
     wait_seconds = float(dag_config.get('download_wait_seconds', 2))
 
     data_dir = _get_data_dir(dag_config, execution_date)
@@ -171,16 +192,14 @@ def download_securities_data(dag_config, **context):
     _cleanup_old_shared_data(dag_config, execution_date, keep_days=keep_days)
 
     symbols = dag_config.get('symbols')
+    resolution = dag_config.get("resolution")
 
-    resolution = "1"
-
-    date_obj = datetime.strptime(date_str, '%Y-%m-%d')
-    from_timestamp = str(int(date_obj.timestamp()))
-    to_timestamp = str(int((date_obj + timedelta(days=1)).timestamp()))
+    from_date, to_date, back_days = _get_data_range_date(dag_config, **context)
+    date_str = to_date.strftime("%Y-%m-%d")
 
     print(f"Downloading securities data for {len(symbols)} symbol(s): {', '.join(symbols)}")
     print(f"Date: {date_str}")
-    print(f"Resolution: {resolution} (1 minute)")
+    print(f"Resolution: {resolution}")
     print(f"Output directory: {data_dir}")
 
     downloaded_files = []
@@ -190,7 +209,8 @@ def download_securities_data(dag_config, **context):
 
             try:
                 df = connector.get_history(
-                    symbol=symbol, resolution=resolution, from_timestamp=from_timestamp, to_timestamp=to_timestamp)
+                    symbol=symbol, resolution=resolution,
+                    from_timestamp=int(from_date.timestamp()), to_timestamp=int(to_date.timestamp()))
 
                 output_filename = f"{symbol}_{date_str}.csv"
                 output_path = os.path.join(data_dir, output_filename)
@@ -216,7 +236,9 @@ def download_securities_data(dag_config, **context):
 
     metadata_path = os.path.join(data_dir, "metadata.json")
     metadata = {
-        'date': date_str,
+        'data_date': date_str,
+        'back_days': back_days,
+        'resolution': resolution,
         'total_symbols': len(symbols),
         'downloaded_files': downloaded_files,
         'success_count': sum(1 for f in downloaded_files if f.get('status') == 'success'),
@@ -385,14 +407,14 @@ with DAG(
     catchup=False,
 ) as dag:
     DAG_CONFIG_VAR_NAME = f"dag_config_{dag.dag_id}"
-    dag_config = _load_dag_config(DAG_CONFIG_VAR_NAME)
-    interval_defs = dag_config.get('intervals', [])
+    d_config = _load_dag_config(DAG_CONFIG_VAR_NAME)
+    interval_defs = d_config.get('intervals', [])
 
     download_task = PythonOperator(
         task_display_name="Download Stock Data",
         task_id="download_securities_data",
         python_callable=download_securities_data,
-        op_kwargs={'dag_config': dag_config},
+        op_kwargs={'dag_config': d_config},
         retries=3,
         retry_delay=timedelta(minutes=5),
     )
@@ -410,7 +432,7 @@ with DAG(
                 task_display_name=f"Push {interval_label} Stock Data to ClickHouse",
                 task_id=f"push_stock_{interval_label.lower()}_to_clickhouse",
                 python_callable=push_to_clickhouse,
-                op_kwargs={'interval_minutes': minutes, 'table_name': table_name, 'dag_config': dag_config},
+                op_kwargs={'interval_minutes': minutes, 'table_name': table_name, 'dag_config': d_config},
                 retries=3,
                 retry_delay=timedelta(minutes=2),
             )

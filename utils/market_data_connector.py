@@ -116,7 +116,7 @@ class SecuritiesMarketConnector:
     def __init__(self,  **setting):
         pass
 
-    def get_history(self, **params):
+    def get_history(self, symbol, **params):
         pass
 
 
@@ -129,6 +129,10 @@ class VietstockConnector(SecuritiesMarketConnector):
         'Origin': 'https://stockchart.vietstock.vn',
         'Referer': 'https://stockchart.vietstock.vn/',
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36'
+    }
+
+    _interval_time_convert_map = {
+        "1m": "1", "5m": "5", "30m": "30", "1h": "60", "1d": "1D", "1w": "1W"
     }
     
     def __init__(self, **setting):
@@ -156,12 +160,17 @@ class VietstockConnector(SecuritiesMarketConnector):
     
     def get_raw_history(self, symbol, **params):
 
-        params['symbol'] = symbol
-        params['to'] = int(datetime.now().timestamp()) if 'to_timestamp' not in params else params.pop('to_timestamp')
-        params['from'] = params['to'] - 86400 if 'from_timestamp' not in params else params.pop('from_timestamp')
-        
         if self._client is None:
             raise RuntimeError("Client not initialized. Use VietstockConnector as context manager.")
+
+        base_resolution = params['resolution']
+        if base_resolution not in self._interval_time_convert_map:
+            raise ValueError(f"Resolution '{base_resolution}' is invalid!")
+
+        params['symbol'] = symbol
+        params['resolution'] = self._interval_time_convert_map.get(base_resolution.lower())
+        params['to'] = int(datetime.now().timestamp()) if 'to_timestamp' not in params else params.pop('to_timestamp')
+        params['from'] = params['to'] - 86400 if 'from_timestamp' not in params else params.pop('from_timestamp')
         
         response = self._client.get(self._base_url, params=params, headers=self._default_headers)
         response.raise_for_status()

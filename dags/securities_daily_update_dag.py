@@ -6,11 +6,15 @@ DAG for daily securities data update
 IMPORTANT: Before running this DAG, create the ClickHouse table first.
 See securities_table_schema.sql for the table schema.
 """
+from abc import ABC
+from collections.abc import MutableMapping
+from typing import Any
+
 from airflow.sdk import DAG
 from airflow.sdk import Variable
-from airflow.sdk import Param, ParamsDict
+from airflow.sdk import Param
 from airflow.providers.standard.operators.python import PythonOperator
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import dateutil.relativedelta
 import pendulum
 import json
@@ -18,6 +22,7 @@ import os
 import time
 import shutil
 import pandas as pd
+
 
 from utils.market_data_connector import VietstockConnector
 from utils.storage_exporter import ClickHouseExporter
@@ -43,7 +48,15 @@ def _get_data_date(dag_config, **context):
     """Get trading date from Airflow context"""
     data_date = dag_config.get('data_date', None)
     if data_date:
-        return data_date
+        # Handle string date from params
+        if isinstance(data_date, str):
+            try:
+                return datetime.strptime(data_date, "%Y-%m-%d").date()
+            except ValueError:
+                pass
+        # Handle date object
+        elif isinstance(data_date, date):
+            return data_date
     logical_date = context.get('logical_date') if 'logical_date' in context else datetime.now()
     return logical_date.date()
 
@@ -80,7 +93,23 @@ def _to_minute_resolution(m_resolution):
     return _resolution_convert_map[rs]
 
 
-def _load_dag_config(config_var_name):
+def _get_param_defaults_from_base_config(raw_config):
+    """Get default values for params from Variable (only for specified fields)"""
+    if raw_config is None:
+        return {}
+    try:
+        cfg = json.loads(raw_config) if isinstance(raw_config, str) else raw_config
+        if not isinstance(cfg, dict):
+            return {}
+        
+        # Only return values for params that can be overridden
+        param_fields = ['base_resolution', 'data_date', 'back_days', 'download_wait_seconds', 'symbols']
+        return {k: v for k, v in cfg.items() if k in param_fields}
+    except Exception:
+        return {}
+
+
+def _load_dag_base_config(config_var_name):
     raw_config = Variable.get(config_var_name, default=None)
     if raw_config is None:
         raise ValueError(f"Airflow Variable '{config_var_name}' is not set. Please create it with DAG configuration.")
@@ -117,6 +146,28 @@ def _load_dag_config(config_var_name):
             raise ValueError("Interval definition missing 'minutes' or 'table_name'.")
 
     return merged
+
+
+def _to_runtime_dag_config(base_config, **context):
+    """
+    Merge params from DAG params into config (only for specified fields).
+    Params override Variable config values.
+    """
+    # Get params from context (from DAG params)
+    params = context.get('params', {})
+    if not isinstance(params, dict):
+        return base_config
+    
+    # Only merge specified param fields
+    param_fields = ['base_resolution', 'data_date', 'back_days', 'download_wait_seconds', 'symbols']
+    merged_config = base_config.copy()
+    
+    for field in param_fields:
+        if field in params:
+            merged_config[field] = params[field]
+            print(f"Using param override for '{field}': {params[field]}")
+    
+    return merged_config
 
 
 def _cleanup_old_shared_data(dag_config, current_date, keep_days=5):
@@ -186,7 +237,10 @@ def download_securities_data(dag_config, **context):
     Download securities data from multiple connectors (Vietstock, future: other connectors)
     Data is saved to shared folder with standardized format
     """
-    execution_date = _get_data_date(**context)
+    # Merge params into config (only for specified fields)
+    dag_config = _to_runtime_dag_config(dag_config, **context)
+    
+    execution_date = _get_data_date(dag_config, **context)
     # date_str = execution_date.strftime("%Y-%m-%d")
 
     keep_days = int(dag_config.get('data_dir_keep_days', 5))
@@ -197,14 +251,14 @@ def download_securities_data(dag_config, **context):
     _cleanup_old_shared_data(dag_config, execution_date, keep_days=keep_days)
 
     symbols = dag_config.get('symbols')
-    resolution = dag_config.get("base_resolution")
+    base_resolution = dag_config.get("base_resolution")
 
     from_date, to_date, back_days = _get_data_range_date(dag_config, **context)
     date_str = to_date.strftime("%Y-%m-%d")
 
     print(f"Downloading securities data for {len(symbols)} symbol(s): {', '.join(symbols)}")
     print(f"Date: {date_str}")
-    print(f"Resolution: {resolution}")
+    print(f"Resolution: {base_resolution}")
     print(f"Output directory: {data_dir}")
 
     downloaded_files = []
@@ -214,7 +268,7 @@ def download_securities_data(dag_config, **context):
 
             try:
                 df = connector.get_history(
-                    symbol=symbol, resolution=resolution,
+                    symbol=symbol, resolution=base_resolution,
                     from_timestamp=int(from_date.timestamp()), to_timestamp=int(to_date.timestamp()))
 
                 output_filename = f"{symbol}_{date_str}.csv"
@@ -243,7 +297,7 @@ def download_securities_data(dag_config, **context):
     metadata = {
         'data_date': date_str,
         'back_days': back_days,
-        'resolution': resolution,
+        'resolution': base_resolution,
         'total_symbols': len(symbols),
         'downloaded_files': downloaded_files,
         'success_count': sum(1 for f in downloaded_files if f.get('status') == 'success'),
@@ -311,6 +365,9 @@ def export_records_to_clickhouse(exporter, records_df: pd.DataFrame, batch_size=
 
 def push_to_clickhouse(resolution, table_name, dag_config, **context):
     """Push securities data to ClickHouse using DAG configuration"""
+    # Merge params into config (only for specified fields)
+    dag_config = _to_runtime_dag_config(dag_config, **context)
+    
     from_date, to_date, back_days = _get_data_range_date(dag_config, **context)
 
     clickhouse_config = dag_config.get('clickhouse')
@@ -404,31 +461,68 @@ def push_to_clickhouse(resolution, table_name, dag_config, **context):
 local_tz = pendulum.timezone("Asia/Ho_Chi_Minh")
 
 # Define the DAG
+# Load param defaults from Variable before DAG definition
+_DAG_ID = 'update_stock_price'
+_DAG_CONFIG_VAR_NAME = f"dag_config_{_DAG_ID}"
+_dag_config = _load_dag_base_config(_DAG_CONFIG_VAR_NAME)
+_param_defaults = _get_param_defaults_from_base_config(_dag_config)
+
+
+# class ParamsDict(MutableMapping[str, Any], ABC):
+#     def __init__(self, params: dict):
+#         pass
+
+
 with DAG(
     dag_display_name="[Securities] Daily Update Stock Price ",
     dag_id='daily_update_stock_price',
     start_date=datetime(2025, 1, 1, tzinfo=local_tz),
     schedule="0 15 * * 1-5",  # Mon-Fri at 15:00 (after market close)
     catchup=False,
-    params=ParamsDict({
-        "symbols": Param(default=["HPG", "VNM", "FPT"], type="array", description="List of stock symbols to download"),
-    })
+    params={
+        "base_resolution": Param(
+            default=_param_defaults.get("base_resolution", "1m"),
+            type="string",
+            description="Base resolution for data download (e.g., 1m, 5m, 1d)"
+        ),
+        "data_date": Param(
+            default=_param_defaults.get("data_date"),
+            type=["string", "null"],
+            format='date',
+            description="Specific date to download (YYYY-MM-DD). If null, uses execution date"
+        ),
+        "back_days": Param(
+            default=_param_defaults.get("back_days", 1),
+            type="integer",
+            description="Number of days to go back from data_date"
+        ),
+        "download_wait_seconds": Param(
+            default=_param_defaults.get("download_wait_seconds", 2),
+            type="number",
+            description="Wait time between downloads (seconds)"
+        ),
+        "symbols": Param(
+            default=_param_defaults.get("symbols", []),
+            type="array",
+            description="List of stock symbols to download"
+        ),
+    }
 ) as dag:
-    DAG_CONFIG_VAR_NAME = f"dag_config_{dag.dag_id}"
-    d_config = _load_dag_config(DAG_CONFIG_VAR_NAME)
-    push_config_tasks = d_config.get('push_config_tasks', [])
+    # DAG_CONFIG_VAR_NAME = f"dag_config_{dag.dag_id}"
+    # d_config = _load_dag_config(DAG_CONFIG_VAR_NAME)
+    push_tasks_configs = _dag_config.get('push_tasks_configs', [])
 
     download_task = PythonOperator(
         task_display_name="Download Stock Data",
         task_id="download_securities_data",
         python_callable=download_securities_data,
-        op_kwargs={'dag_config': d_config},
+        op_kwargs={'dag_config': _dag_config},
         retries=3,
         retry_delay=timedelta(minutes=5),
     )
 
     push_tasks = []
-    for c_task in push_config_tasks:
+    for c_task in push_tasks_configs:
         resolution = c_task.get('resolution')
         table_name = c_task.get('table_name')
         if table_name is None:
@@ -438,7 +532,7 @@ with DAG(
                 task_display_name=f"Push {resolution} Stock Data to ClickHouse",
                 task_id=f"push_stock_{resolution.lower()}_to_clickhouse",
                 python_callable=push_to_clickhouse,
-                op_kwargs={'resolution': resolution, 'table_name': table_name, 'dag_config': d_config},
+                op_kwargs={'resolution': resolution, 'table_name': table_name, 'dag_config': _dag_config},
                 retries=3,
                 retry_delay=timedelta(minutes=2),
             )

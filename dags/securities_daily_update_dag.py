@@ -232,7 +232,7 @@ def download_securities_data(dag_config, **context):
     # Merge params into config (only for specified fields)
     dag_config = _to_runtime_dag_config(dag_config, **context)
     
-    execution_date = _get_data_date(dag_config, **context)
+    execution_date = _get_data_date(dag_config, **context).date()
     # date_str = execution_date.strftime("%Y-%m-%d")
 
     keep_days = int(dag_config.get('data_dir_keep_days', 5))

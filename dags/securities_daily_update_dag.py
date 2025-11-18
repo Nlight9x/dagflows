@@ -129,20 +129,20 @@ def _load_dag_base_config(config_var_name):
     if base_resolution.lower() not in _resolution_convert_map:
         raise ValueError(f"Resolution '{base_resolution}' is invalid!")
 
-    clickhouse_cfg = merged.get('clickhouse')
+    clickhouse_cfg = merged.get('clickhouse_connection_config')
     if not isinstance(clickhouse_cfg, dict):
-        raise ValueError("DAG config must include 'clickhouse' object with connection info.")
+        raise ValueError("DAG config must include 'clickhouse_connection_config' object with connection info.")
     for key in ["host", "port", "database", "user", "password"]:
         if key not in clickhouse_cfg:
             raise ValueError(f"ClickHouse config must include '{key}' field.")
 
-    intervals = merged.get('intervals')
-    if not isinstance(intervals, list) or len(intervals) == 0:
-        raise ValueError("DAG config must include 'intervals' list.")
-    for interval in intervals:
-        if not isinstance(interval, dict):
+    config_tasks = merged.get('push_config_tasks')
+    if not isinstance(config_tasks, list) or len(config_tasks) == 0:
+        raise ValueError("DAG config must include 'push_config_tasks' list.")
+    for cfg in config_tasks:
+        if not isinstance(cfg, dict):
             raise ValueError("Each interval definition must be an object with 'minutes' and 'table_name'.")
-        if 'minutes' not in interval or 'table_name' not in interval:
+        if 'resolution' not in cfg or 'table_name' not in cfg:
             raise ValueError("Interval definition missing 'minutes' or 'table_name'.")
 
     return merged

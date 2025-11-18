@@ -128,10 +128,10 @@ def _load_dag_base_config(config_var_name):
         if key not in clickhouse_cfg:
             raise ValueError(f"ClickHouse config must include '{key}' field.")
 
-    config_tasks = merged.get('push_config_tasks')
-    if not isinstance(config_tasks, list) or len(config_tasks) == 0:
-        raise ValueError("DAG config must include 'push_config_tasks' list.")
-    for cfg in config_tasks:
+    task_configs = merged.get('push_task_configs')
+    if not isinstance(task_configs, list) or len(task_configs) == 0:
+        raise ValueError("DAG config must include 'push_task_configs' list.")
+    for cfg in task_configs:
         if not isinstance(cfg, dict):
             raise ValueError("Each interval definition must be an object with 'minutes' and 'table_name'.")
         if 'resolution' not in cfg or 'table_name' not in cfg:

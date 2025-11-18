@@ -248,7 +248,7 @@ def download_securities_data(dag_config, **context):
     from_date, to_date, back_days = _get_data_range_date(dag_config, **context)
     date_str = to_date.strftime("%Y-%m-%d")
 
-    print(f"Downloading securities data for {len(symbols)} symbol(s): {', '.join(symbols)}")
+    print(f"Downloading securities data.")
     print(f"Date: {date_str}")
     print(f"Resolution: {base_resolution}")
     print(f"Output directory: {data_dir}")
@@ -454,7 +454,7 @@ local_tz = pendulum.timezone("Asia/Ho_Chi_Minh")
 
 # Define the DAG
 # Load param defaults from Variable before DAG definition
-_DAG_ID = 'daily_update_stock_price'
+_DAG_ID = 'update_stock_price'
 _DAG_CONFIG_VAR_NAME = f"dag_config_{_DAG_ID}"
 _dag_config = _load_dag_base_config(_DAG_CONFIG_VAR_NAME)
 _param_defaults = _get_param_defaults_from_base_config(_dag_config)
@@ -466,7 +466,7 @@ _param_defaults = _get_param_defaults_from_base_config(_dag_config)
 
 
 with DAG(
-    dag_display_name="[Securities] Daily Update Stock Price ",
+    dag_display_name="[Securities] Update Stock Price ",
     dag_id=_DAG_ID,
     start_date=datetime(2025, 1, 1, tzinfo=local_tz),
     schedule="0 15 * * 1-5",  # Mon-Fri at 15:00 (after market close)

@@ -48,17 +48,9 @@ def _get_data_date(dag_config, **context):
     """Get trading date from Airflow context"""
     data_date = dag_config.get('data_date', None)
     if data_date:
-        # Handle string date from params
-        if isinstance(data_date, str):
-            try:
-                return datetime.strptime(data_date, "%Y-%m-%d").date()
-            except ValueError:
-                pass
-        # Handle date object
-        elif isinstance(data_date, date):
-            return data_date
+        return datetime.strptime(data_date, "%Y-%m-%d")
     logical_date = context.get('logical_date') if 'logical_date' in context else datetime.now()
-    return logical_date.date()
+    return logical_date
 
 
 def _get_data_range_date(dag_config, **context):
@@ -397,7 +389,7 @@ def push_to_clickhouse(resolution, table_name, dag_config, **context):
 
         clickhouse_config['table_name'] = table_name
         exporter = ClickHouseExporter(**clickhouse_config)
-        exporter.delete_by_dates([from_date + timedelta(days=i) for i in range(back_days + 1)])
+        exporter.delete_by_dates([from_date.date() + timedelta(days=i) for i in range(back_days + 1)])
 
         for file_info in metadata['downloaded_files']:
             if file_info.get('status') != 'success':

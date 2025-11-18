@@ -462,7 +462,7 @@ local_tz = pendulum.timezone("Asia/Ho_Chi_Minh")
 
 # Define the DAG
 # Load param defaults from Variable before DAG definition
-_DAG_ID = 'update_stock_price'
+_DAG_ID = 'daily_update_stock_price'
 _DAG_CONFIG_VAR_NAME = f"dag_config_{_DAG_ID}"
 _dag_config = _load_dag_base_config(_DAG_CONFIG_VAR_NAME)
 _param_defaults = _get_param_defaults_from_base_config(_dag_config)
@@ -475,7 +475,7 @@ _param_defaults = _get_param_defaults_from_base_config(_dag_config)
 
 with DAG(
     dag_display_name="[Securities] Daily Update Stock Price ",
-    dag_id='daily_update_stock_price',
+    dag_id=_DAG_ID,
     start_date=datetime(2025, 1, 1, tzinfo=local_tz),
     schedule="0 15 * * 1-5",  # Mon-Fri at 15:00 (after market close)
     catchup=False,

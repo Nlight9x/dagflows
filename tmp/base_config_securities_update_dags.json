@@ -3,6 +3,7 @@
     "shared_root": "/opt/airflow/shared",
     "shared_subdir": "stock",
     "base_resolution": "1m",
+    "data_date": null,
     "back_days": 1,
     "data_dir_keep_days": 5,
     "download_wait_seconds": 2,
@@ -14,7 +15,7 @@
         "user": "clickhouse",
         "password": "Q_zG%ysx3}p)s1]"
     },
-    "pushing_config_tasks": [{
+    "push_config_tasks": [{
         "resolution": "1m",
         "table_name": "vnstock_price_1m"
     }, {
@@ -28,4 +29,13 @@
         "table_name": "vnstock_price_1d"
     }],
     "export_batch_size": 1000
+}
+
+{
+    "mode": "Custom",
+    "base_resolution": "1m",
+    "data_date": null,
+    "back_days": 1,
+    "download_wait_seconds": 2,
+    "symbols": ["ACB", "BCM", "BID", "CTG", "DGC", "FPT", "GAS", "GVR", "HDB", "HPG", "LPB", "MBB", "MSN", "MWG", "PLX", "SAB", "SHB", "SSB", "SSI", "STB", "TCB", "TPB", "VCB", "VHM", "VIB", "VIC", "VJC", "VNM", "VPB", "VRE", "AAA", "AGG", "ANV", "ASM", "BCG", "BMP", "BSI", "BWE", "CII", "CMG", "CRE", "CTD", "CTR", "CTS", "DBC", "DCM", "DGW", "DHC", "DIG", "DPM", "DSE", "DXG", "DXS", "EIB", "EVF", "FRT", "FTS", "GEX", "GMD", "HAG", "HCM", "HDC", "HDG", "HHV", "HSG", "HT1", "IMP", "KBC", "KDC", "KDH", "KOS", "MSB", "NAB", "NKG", "NLG", "NT2", "NVL", "OCB", "PAN", "PC1", "PDR", "PHR", "PNJ", "POW", "PPC", "PTB", "PVD", "PVT", "REE", "SBT", "SCS", "SIP", "SJS", "SZC", "TCH", "TLG", "VCG", "VCI", "VGC", "VHC", "VIX", "VND", "VPI", "VSH", "VTP"]
 }

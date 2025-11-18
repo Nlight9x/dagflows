@@ -7,8 +7,9 @@ IMPORTANT: Before running this DAG, create the ClickHouse table first.
 See securities_table_schema.sql for the table schema.
 """
 from airflow.sdk import DAG
-from airflow.providers.standard.operators.python import PythonOperator
 from airflow.sdk import Variable
+from airflow.sdk import Param, ParamsDict
+from airflow.providers.standard.operators.python import PythonOperator
 from datetime import datetime, timedelta
 import dateutil.relativedelta
 import pendulum
@@ -40,7 +41,7 @@ _resolution_convert_map = {
 
 def _get_data_date(dag_config, **context):
     """Get trading date from Airflow context"""
-    data_date = dag_config.get('data_date')
+    data_date = dag_config.get('data_date', None)
     if data_date:
         return data_date
     logical_date = context.get('logical_date') if 'logical_date' in context else datetime.now()
@@ -72,22 +73,19 @@ def _to_interval_label(interval_minutes):
         return f"{interval_minutes}m"
 
 
-def _to_minute_resolution(resolution):
-    resolution = resolution.lower()
-    if resolution not in _resolution_convert_map:
-        raise ValueError(f"Resolution '{resolution}' is invalid!")
-    return _resolution_convert_map[resolution]
+def _to_minute_resolution(m_resolution):
+    rs = m_resolution.lower()
+    if rs not in _resolution_convert_map:
+        raise ValueError(f"Resolution '{m_resolution}' is invalid!")
+    return _resolution_convert_map[rs]
 
 
 def _load_dag_config(config_var_name):
     raw_config = Variable.get(config_var_name, default=None)
     if raw_config is None:
         raise ValueError(f"Airflow Variable '{config_var_name}' is not set. Please create it with DAG configuration.")
-    try:
-        cfg = json.loads(raw_config) if isinstance(raw_config, str) else raw_config
-    except Exception as exc:
-        raise ValueError(f"Failed to parse DAG config from Variable '{config_var_name}': {exc}")
 
+    cfg = json.loads(raw_config) if isinstance(raw_config, str) else raw_config
     if not isinstance(cfg, dict):
         raise ValueError(f"DAG config must be a JSON object. Got: {type(cfg)}")
 
@@ -412,10 +410,13 @@ with DAG(
     start_date=datetime(2025, 1, 1, tzinfo=local_tz),
     schedule="0 15 * * 1-5",  # Mon-Fri at 15:00 (after market close)
     catchup=False,
+    params=ParamsDict({
+        "symbols": Param(default=["HPG", "VNM", "FPT"], type="array", description="List of stock symbols to download"),
+    })
 ) as dag:
     DAG_CONFIG_VAR_NAME = f"dag_config_{dag.dag_id}"
     d_config = _load_dag_config(DAG_CONFIG_VAR_NAME)
-    pushing_config_tasks = d_config.get('pushing_config_tasks', [])
+    push_config_tasks = d_config.get('push_config_tasks', [])
 
     download_task = PythonOperator(
         task_display_name="Download Stock Data",
@@ -427,7 +428,7 @@ with DAG(
     )
 
     push_tasks = []
-    for c_task in pushing_config_tasks:
+    for c_task in push_config_tasks:
         resolution = c_task.get('resolution')
         table_name = c_task.get('table_name')
         if table_name is None:

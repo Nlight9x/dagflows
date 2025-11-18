@@ -15,7 +15,7 @@
         "user": "clickhouse",
         "password": "Q_zG%ysx3}p)s1]"
     },
-    "push_config_tasks": [{
+    "push_task_configs": [{
         "resolution": "1m",
         "table_name": "vnstock_price_1m"
     }, {

@@ -454,7 +454,7 @@ local_tz = pendulum.timezone("Asia/Ho_Chi_Minh")
 
 # Define the DAG
 # Load param defaults from Variable before DAG definition
-_DAG_ID = 'update_stock_price'
+_DAG_ID = 'daily_update_stock_price'
 _DAG_CONFIG_VAR_NAME = f"dag_config_{_DAG_ID}"
 _dag_config = _load_dag_base_config(_DAG_CONFIG_VAR_NAME)
 _param_defaults = _get_param_defaults_from_base_config(_dag_config)
@@ -502,7 +502,7 @@ with DAG(
 ) as dag:
     # DAG_CONFIG_VAR_NAME = f"dag_config_{dag.dag_id}"
     # d_config = _load_dag_config(DAG_CONFIG_VAR_NAME)
-    push_tasks_configs = _dag_config.get('push_tasks_configs', [])
+    push_task_configs = _dag_config.get('push_task_configs', [])
 
     download_task = PythonOperator(
         task_display_name="Download Stock Data",
@@ -514,7 +514,7 @@ with DAG(
     )
 
     push_tasks = []
-    for c_task in push_tasks_configs:
+    for c_task in push_task_configs:
         resolution = c_task.get('resolution')
         table_name = c_task.get('table_name')
         if table_name is None:

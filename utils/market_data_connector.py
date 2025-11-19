@@ -83,14 +83,25 @@ class VietstockParser(SecuritiesPriceParser):
 
         if self._auto_fill_gap:
             filled_frames = []
+            fred = self._resolution_convert_to_diff_time_map.get(resolution, 'T')
+            # Check if freq is day-based or larger (D, W, M, Y) - no need to loop through sessions
+            is_day_based = fred in ['D', 'W', 'M', 'Y'] or (isinstance(fred, str) and any(fred.startswith(x) for x in ['D', 'W', 'M', 'Y']))
+            
             for trading_day in sorted(df['date'].unique()):
                 day_df = df[df['date'] == trading_day]
                 session_ranges = []
-                for session_start, session_end in self._session_time:
-                    start_dt = datetime.combine(trading_day, session_start)
-                    end_dt = datetime.combine(trading_day, session_end)
-                    fred = self._resolution_convert_to_diff_time_map.get(resolution, 'T')
+                
+                if is_day_based:
+                    # For day-based or larger frequencies, create only one range for the entire day
+                    start_dt = datetime.combine(trading_day, time.min)
+                    end_dt = datetime.combine(trading_day, time.max)
                     session_ranges.append(pd.date_range(start_dt, end_dt, freq=fred))
+                else:
+                    # For minute/hour-based frequencies, loop through trading sessions
+                    for session_start, session_end in self._session_time:
+                        start_dt = datetime.combine(trading_day, session_start)
+                        end_dt = datetime.combine(trading_day, session_end)
+                        session_ranges.append(pd.date_range(start_dt, end_dt, freq=fred))
 
                 if session_ranges:
                     expected_index = pd.DatetimeIndex(sorted(set().union(*session_ranges)))

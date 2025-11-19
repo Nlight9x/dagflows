@@ -9,12 +9,16 @@ class SecuritiesPriceParser:
     _default_time_sessions = [(time(9, 15), time(11, 30)), (time(13, 0), time(14, 30)), (time(14, 45), time(14, 45))]
     _local_tz = ZoneInfo("Asia/Ho_Chi_Minh")
 
+    _resolution_convert_to_diff_time_map = {
+        "1m": "T", "5m": "5T", "30m": "30T", "1h": "H", "1d": "D", "1w": "W"
+    }
+
     def __init__(self,  **config):
         self._auto_fill_gap = config.get('auto_fill_gap', True)
         self._session_time = config.get('trading_sessions', self._default_time_sessions)
         self._local_tz = config.get('local_tz', self._local_tz)
 
-    def parse(self, raw_data, symbol=None) -> pd.DataFrame:
+    def parse(self, raw_data, symbol=None, **setting) -> pd.DataFrame:
         raise NotImplementedError
 
 
@@ -22,7 +26,7 @@ class VietstockParser(SecuritiesPriceParser):
     def __init__(self, **config):
         super().__init__(**config)
 
-    def parse(self, raw_data, symbol=None) -> pd.DataFrame:
+    def parse(self, raw_data, symbol=None, resolution=None, **setting) -> pd.DataFrame:
         if not raw_data:
             columns = ['symbol', 'timestamp', 'datetime', 'open', 'high', 'low', 'close', 'volume', 'date']
             return pd.DataFrame(columns=columns)
@@ -85,7 +89,8 @@ class VietstockParser(SecuritiesPriceParser):
                 for session_start, session_end in self._session_time:
                     start_dt = datetime.combine(trading_day, session_start)
                     end_dt = datetime.combine(trading_day, session_end)
-                    session_ranges.append(pd.date_range(start_dt, end_dt, freq='T'))
+                    fred = self._resolution_convert_to_diff_time_map.get(resolution, 'T')
+                    session_ranges.append(pd.date_range(start_dt, end_dt, freq=fred))
 
                 if session_ranges:
                     expected_index = pd.DatetimeIndex(sorted(set().union(*session_ranges)))
@@ -131,7 +136,7 @@ class VietstockConnector(SecuritiesMarketConnector):
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36'
     }
 
-    _interval_time_convert_map = {
+    _resolution_convert_map = {
         "1m": "1", "5m": "5", "30m": "30", "1h": "60", "1d": "1D", "1w": "1W"
     }
     
@@ -164,11 +169,11 @@ class VietstockConnector(SecuritiesMarketConnector):
             raise RuntimeError("Client not initialized. Use VietstockConnector as context manager.")
 
         base_resolution = params['resolution'].lower()
-        if base_resolution not in self._interval_time_convert_map:
+        if base_resolution not in self._resolution_convert_map:
             raise ValueError(f"Resolution '{params['resolution']}' is invalid!")
 
         params['symbol'] = symbol
-        params['resolution'] = self._interval_time_convert_map.get(base_resolution)
+        params['resolution'] = self._resolution_convert_map.get(base_resolution)
         params['to'] = int(datetime.now().timestamp()) if 'to_timestamp' not in params else params.pop('to_timestamp')
         params['from'] = params['to'] - 86400 if 'from_timestamp' not in params else params.pop('from_timestamp')
 
@@ -181,5 +186,5 @@ class VietstockConnector(SecuritiesMarketConnector):
 
     def get_history(self, symbol, **params):
         raw = self.get_raw_history(symbol, **params)
-        return self._parser.parse(raw, symbol=symbol)
+        return self._parser.parse(raw, symbol=symbol, resolution=params['resolution'])
 

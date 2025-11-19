@@ -377,12 +377,12 @@ def push_to_clickhouse(resolution, table_name, dag_config, **context):
     with open(metadata_path, 'r', encoding='utf-8') as f:
         metadata = json.load(f)
 
-    minute_resolution = _to_minute_resolution(resolution)
-    downloaded_resolution = _to_minute_resolution(metadata.get('resolution'))
+    convert_resolution = _to_minute_resolution(resolution)
+    download_resolution = _to_minute_resolution(metadata.get('resolution'))
     total_exported = 0
     results = []
 
-    if minute_resolution % downloaded_resolution == 0:
+    if convert_resolution % download_resolution == 0:
         print(f"Pushing {resolution} data to ClickHouse table: {table_name}")
         print(f"Data directory: {data_dir}")
         print(f"Found {len(metadata['downloaded_files'])} files to process")
@@ -458,11 +458,6 @@ _DAG_ID = 'daily_update_stock_price'
 _DAG_CONFIG_VAR_NAME = f"dag_config_{_DAG_ID}"
 _dag_config = _load_dag_base_config(_DAG_CONFIG_VAR_NAME)
 _param_defaults = _get_param_defaults_from_base_config(_dag_config)
-
-
-# class ParamsDict(MutableMapping[str, Any], ABC):
-#     def __init__(self, params: dict):
-#         pass
 
 
 with DAG(

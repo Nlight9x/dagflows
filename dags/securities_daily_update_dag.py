@@ -378,7 +378,7 @@ def push_to_clickhouse(resolution, table_name, dag_config, **context):
         metadata = json.load(f)
 
     minute_resolution = _to_minute_resolution(resolution)
-    downloaded_resolution = metadata.get('resolution')
+    downloaded_resolution = _to_minute_resolution(metadata.get('resolution'))
     total_exported = 0
     results = []
 

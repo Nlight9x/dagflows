@@ -362,7 +362,7 @@ def push_to_clickhouse(resolution, table_name, dag_config, **context):
     
     from_date, to_date, back_days = _get_data_range_date(dag_config, **context)
 
-    clickhouse_config = dag_config.get('clickhouse')
+    clickhouse_config = dag_config.get('clickhouse_connection_config')
     if isinstance(clickhouse_config, str):
         clickhouse_config = json.loads(clickhouse_config)
     if not isinstance(clickhouse_config, dict) or not clickhouse_config:

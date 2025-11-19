@@ -22,7 +22,7 @@
         "resolution": "5m",
         "table_name": "vnstock_price_5m"
     }, {
-        "resolution": "3m",
+        "resolution": "30m",
         "table_name": "vnstock_price_30m"
     }, {
         "resolution": "1d",

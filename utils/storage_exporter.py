@@ -485,8 +485,8 @@ class ClickHouseExporter(StorageExporter):
         """Close the underlying driver connection"""
         self._driver.close_pool()
 
-    def delete_by_dates(self, dates, date_column='date'):
-        """Delete existing rows for specified dates before inserting new data"""
+    def delete_by_symbol_and_date(self, dates, symbols=None, date_column='date', symbol_column='symbol'):
+        """Delete existing rows for specified dates and symbols before inserting new data"""
         if not dates:
             return 0
         if not isinstance(dates, (list, tuple, set)):
@@ -510,11 +510,29 @@ class ClickHouseExporter(StorageExporter):
         if not cleaned_dates:
             return 0
 
+        # Prepare symbols list if provided
+        cleaned_symbols = []
+        if symbols:
+            if not isinstance(symbols, (list, tuple, set)):
+                symbols = [symbols]
+            cleaned_symbols = [str(s).replace("'", "''") for s in symbols if s is not None]  # Escape single quotes
+
+        # Build WHERE clause
+        where_conditions = [f"`{date_column}` = %(target_date)s"]
+        if cleaned_symbols:
+            # Use tuple format for IN clause (safe since symbols are validated)
+            symbols_tuple = "('" + "','".join(cleaned_symbols) + "')"
+            where_conditions.append(f"`{symbol_column}` IN {symbols_tuple}")
+
         query = f"""
             ALTER TABLE `{self._table_name}`
-            DELETE WHERE `{date_column}` = %(target_date)s
+            DELETE WHERE {' AND '.join(where_conditions)}
             SETTINGS mutations_sync = 1
         """
+        
+        deleted_count = 0
         for value in cleaned_dates:
-            self._driver.execute_query(query, {'target_date': value})
-        return len(cleaned_dates)
+            params = {'target_date': value}
+            self._driver.execute_query(query, params)
+            deleted_count += 1
+        return deleted_count

@@ -83,7 +83,7 @@ class VietstockParser(SecuritiesPriceParser):
 
         if self._auto_fill_minute_gap:
             filled_frames = []
-            fred = self._resolution_convert_to_diff_time_map.get(resolution, 'T')
+            fred = self._resolution_convert_to_diff_time_map.get(resolution.lower(), 'T')
             # Check if freq is day-based or larger (D, W, M, Y) - no need to loop through sessions
             is_day_based = fred in ['D', 'W', 'M', 'Y'] or (isinstance(fred, str) and any(fred.startswith(x) for x in ['D', 'W', 'M', 'Y']))
             if not is_day_based:

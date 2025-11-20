@@ -332,6 +332,9 @@ def aggregate_minute_records(records: pd.DataFrame, minute_resolution):
         'volume': 'sum'
     })
 
+    # Drop buckets where all OHLC fields are NaN (no underlying data)
+    resampled.dropna(subset=['open', 'high', 'low', 'close'], how='all', inplace=True)
+
     resampled.reset_index(inplace=True)
     resampled['timestamp'] = (resampled['datetime'].view('int64') // 10**9).astype(int)
 

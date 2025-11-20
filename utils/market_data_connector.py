@@ -111,10 +111,10 @@ class VietstockParser(SecuritiesPriceParser):
                         day_df = day_df.reset_index(drop=True)
 
                     filled_frames.append(day_df)
-            df = pd.concat(filled_frames, ignore_index=True)
-        else:
-            df = df.reset_index(drop=True)
-
+                df = pd.concat(filled_frames, ignore_index=True)
+        
+        # Reset index to ensure clean 0-based index (after sort_values, index may not be sequential)
+        df = df.reset_index(drop=True)
         df = df[['symbol', 'timestamp', 'datetime', 'open', 'high', 'low', 'close', 'volume', 'date']]
         return df
 

@@ -412,7 +412,7 @@ def push_to_clickhouse(resolution, table_name, dag_config, **context):
                 if 'timestamp' not in df.columns:
                     df['timestamp'] = (df['datetime'].view('int64') // 10**9).astype(int)
 
-                records_df = aggregate_minute_records(df, minute_resolution)
+                records_df = aggregate_minute_records(df, convert_resolution)
                 if records_df.empty:
                     continue
                 records_df['symbol'] = symbol

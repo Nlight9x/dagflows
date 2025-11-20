@@ -48,9 +48,10 @@ def _get_data_date(dag_config, **context):
     """Get trading date from Airflow context"""
     data_date = dag_config.get('data_date', None)
     if data_date:
-        return datetime.strptime(data_date, "%Y-%m-%d")
+        dt = datetime.strptime(data_date, "%Y-%m-%d")
+        return dt.replace(hour=23, minute=59, second=59)
     logical_date = context.get('logical_date') if 'logical_date' in context else datetime.now()
-    return logical_date
+    return logical_date.replace(hour=23, minute=59, second=59)
 
 
 def _get_data_range_date(dag_config, **context):

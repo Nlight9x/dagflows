@@ -534,7 +534,7 @@ def render_dag(dag_id, **config):
 local_tz = pendulum.timezone("Asia/Ho_Chi_Minh")
 
 dag_1 = render_dag(
-    dag_id='daily_update_hose_stock_price',
+    dag_id='update_hose_stock_price',
     dag_display_name="[Securities] Update HOSE Stock Price ",
     start_date=datetime(2025, 1, 1, tzinfo=local_tz),
     schedule="0 15 * * 1-5",  # Mon-Fri at 15:00 (after market close)
@@ -542,7 +542,7 @@ dag_1 = render_dag(
 )
 
 dag_2 = render_dag(
-    dag_id='daily_update_hnx_stock_price',
+    dag_id='update_hnx_stock_price',
     dag_display_name="[Securities] Update HNX Stock Price ",
     start_date=datetime(2025, 1, 1, tzinfo=local_tz),
     schedule="0 16 * * 1-5",  # Mon-Fri at 15:00 (after market close)

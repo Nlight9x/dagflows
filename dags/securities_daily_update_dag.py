@@ -6,10 +6,6 @@ DAG for daily securities data update
 IMPORTANT: Before running this DAG, create the ClickHouse table first.
 See securities_table_schema.sql for the table schema.
 """
-from abc import ABC
-from collections.abc import MutableMapping
-from typing import Any
-
 from airflow.sdk import DAG
 from airflow.sdk import Variable
 from airflow.sdk import Param
@@ -460,122 +456,171 @@ def push_to_clickhouse(resolution, table_name, dag_config, **context):
     return summary
 
 
+def render_dag(dag_id, **config):
+    _DAG_ID = dag_id
+    _DAG_CONFIG_VAR_NAME = f"dag_config_{_DAG_ID}"
+    _dag_config = _load_dag_base_config(_DAG_CONFIG_VAR_NAME)
+    _param_defaults = _get_param_defaults_from_base_config(_dag_config)
+
+    with DAG(
+        # dag_display_name="[Securities] Update Stock Price ",
+        dag_id=_DAG_ID,
+        # start_date=datetime(2025, 1, 1, tzinfo=local_tz),
+        # schedule="0 15 * * 1-5",  # Mon-Fri at 15:00 (after market close)
+        # catchup=False,
+        params={
+            "base_resolution": Param(
+                default=_param_defaults.get("base_resolution", "1m"),
+                type="string",
+                description="Base resolution for data download (e.g., 1m, 5m, 1d)"
+            ),
+            "data_date": Param(
+                default=_param_defaults.get("data_date"),
+                type=["string", "null"],
+                format='date',
+                description="Specific date to download (YYYY-MM-DD). If null, uses execution date"
+            ),
+            "back_days": Param(
+                default=_param_defaults.get("back_days", 1),
+                type="integer",
+                description="Number of days to go back from data_date"
+            ),
+            "download_wait_seconds": Param(
+                default=_param_defaults.get("download_wait_seconds", 2),
+                type="number",
+                description="Wait time between downloads (seconds)"
+            ),
+            "symbols": Param(
+                default=_param_defaults.get("symbols", []),
+                type="array",
+                description="List of stock symbols to download"
+            ),
+        },
+        **config
+    ) as dag:
+        push_task_configs = _dag_config.get('push_task_configs', [])
+
+        download_task = PythonOperator(
+            task_display_name="Download Stock Data",
+            task_id="download_securities_data",
+            python_callable=download_securities_data,
+            op_kwargs={'dag_config': _dag_config},
+            retries=3,
+            retry_delay=timedelta(minutes=5),
+        )
+
+        push_tasks = []
+        for c_task in push_task_configs:
+            resolution = c_task.get('resolution')
+            table_name = c_task.get('table_name')
+            if table_name is None:
+                raise ValueError("Each interval config must include 'table_name'.")
+            push_tasks.append(
+                PythonOperator(
+                    task_display_name=f"Push {resolution} Stock Data to ClickHouse",
+                    task_id=f"push_stock_{resolution.lower()}_to_clickhouse",
+                    python_callable=push_to_clickhouse,
+                    op_kwargs={'resolution': resolution, 'table_name': table_name, 'dag_config': _dag_config},
+                    retries=3,
+                    retry_delay=timedelta(minutes=2),
+                )
+            )
+
+        download_task >> push_tasks
+    return dag
+
+
 # Set timezone_default_time_sessions
 local_tz = pendulum.timezone("Asia/Ho_Chi_Minh")
 
-# Define the DAG
-# Load param defaults from Variable before DAG definition
-_DAG_ID = 'daily_update_stock_price'
-_DAG_CONFIG_VAR_NAME = f"dag_config_{_DAG_ID}"
-_dag_config = _load_dag_base_config(_DAG_CONFIG_VAR_NAME)
-_param_defaults = _get_param_defaults_from_base_config(_dag_config)
-
-
-with DAG(
-    dag_display_name="[Securities] Update Stock Price ",
-    dag_id=_DAG_ID,
+dag_1 = render_dag(
+    dag_id='daily_update_hose_stock_price',
+    dag_display_name="[Securities] Update HOSE Stock Price ",
     start_date=datetime(2025, 1, 1, tzinfo=local_tz),
     schedule="0 15 * * 1-5",  # Mon-Fri at 15:00 (after market close)
     catchup=False,
-    params={
-        "base_resolution": Param(
-            default=_param_defaults.get("base_resolution", "1m"),
-            type="string",
-            description="Base resolution for data download (e.g., 1m, 5m, 1d)"
-        ),
-        "data_date": Param(
-            default=_param_defaults.get("data_date"),
-            type=["string", "null"],
-            format='date',
-            description="Specific date to download (YYYY-MM-DD). If null, uses execution date"
-        ),
-        "back_days": Param(
-            default=_param_defaults.get("back_days", 1),
-            type="integer",
-            description="Number of days to go back from data_date"
-        ),
-        "download_wait_seconds": Param(
-            default=_param_defaults.get("download_wait_seconds", 2),
-            type="number",
-            description="Wait time between downloads (seconds)"
-        ),
-        "symbols": Param(
-            default=_param_defaults.get("symbols", []),
-            type="array",
-            description="List of stock symbols to download"
-        ),
-    }
-) as dag:
-    # DAG_CONFIG_VAR_NAME = f"dag_config_{dag.dag_id}"
-    # d_config = _load_dag_config(DAG_CONFIG_VAR_NAME)
-    push_task_configs = _dag_config.get('push_task_configs', [])
+)
 
-    download_task = PythonOperator(
-        task_display_name="Download Stock Data",
-        task_id="download_securities_data",
-        python_callable=download_securities_data,
-        op_kwargs={'dag_config': _dag_config},
-        retries=3,
-        retry_delay=timedelta(minutes=5),
-    )
-
-    push_tasks = []
-    for c_task in push_task_configs:
-        resolution = c_task.get('resolution')
-        table_name = c_task.get('table_name')
-        if table_name is None:
-            raise ValueError("Each interval config must include 'table_name'.")
-        push_tasks.append(
-            PythonOperator(
-                task_display_name=f"Push {resolution} Stock Data to ClickHouse",
-                task_id=f"push_stock_{resolution.lower()}_to_clickhouse",
-                python_callable=push_to_clickhouse,
-                op_kwargs={'resolution': resolution, 'table_name': table_name, 'dag_config': _dag_config},
-                retries=3,
-                retry_delay=timedelta(minutes=2),
-            )
-        )
-
-    download_task >> push_tasks
+dag_2 = render_dag(
+    dag_id='daily_update_hnx_stock_price',
+    dag_display_name="[Securities] Update HNX Stock Price ",
+    start_date=datetime(2025, 1, 1, tzinfo=local_tz),
+    schedule="0 16 * * 1-5",  # Mon-Fri at 15:00 (after market close)
+    catchup=False,
+)
 
 
+
+# # Define the DAG
+# # Load param defaults from Variable before DAG definition
+# _DAG_ID = 'daily_update_stock_price'
+# _DAG_CONFIG_VAR_NAME = f"dag_config_{_DAG_ID}"
+# _dag_config = _load_dag_base_config(_DAG_CONFIG_VAR_NAME)
+# _param_defaults = _get_param_defaults_from_base_config(_dag_config)
+#
+#
 # with DAG(
-#     dag_display_name="[Securities] Daily Update VN30 Derivative Index",
-#     dag_id='daily_update_vn30d_index',
+#     dag_display_name="[Securities] Update Stock Price ",
+#     dag_id=_DAG_ID,
 #     start_date=datetime(2025, 1, 1, tzinfo=local_tz),
-#     schedule="30 15 * * 1-5",  # Daily at 15:00 (after market close)
+#     schedule="0 15 * * 1-5",  # Mon-Fri at 15:00 (after market close)
 #     catchup=False,
+#     params={
+#         "base_resolution": Param(
+#             default=_param_defaults.get("base_resolution", "1m"),
+#             type="string",
+#             description="Base resolution for data download (e.g., 1m, 5m, 1d)"
+#         ),
+#         "data_date": Param(
+#             default=_param_defaults.get("data_date"),
+#             type=["string", "null"],
+#             format='date',
+#             description="Specific date to download (YYYY-MM-DD). If null, uses execution date"
+#         ),
+#         "back_days": Param(
+#             default=_param_defaults.get("back_days", 1),
+#             type="integer",
+#             description="Number of days to go back from data_date"
+#         ),
+#         "download_wait_seconds": Param(
+#             default=_param_defaults.get("download_wait_seconds", 2),
+#             type="number",
+#             description="Wait time between downloads (seconds)"
+#         ),
+#         "symbols": Param(
+#             default=_param_defaults.get("symbols", []),
+#             type="array",
+#             description="List of stock symbols to download"
+#         ),
+#     }
 # ) as dag:
-#     DAG_CONFIG_VAR_NAME = f"{dag.dag_id}_config"
-#     dag_config = _load_dag_config(DAG_CONFIG_VAR_NAME)
-#     interval_defs = dag_config.get('intervals', [])
+#     push_task_configs = _dag_config.get('push_task_configs', [])
 #
 #     download_task = PythonOperator(
-#         task_display_name="Download VN30 Derivative Data",
-#         task_id="download_vn30d_data",
+#         task_display_name="Download Stock Data",
+#         task_id="download_securities_data",
 #         python_callable=download_securities_data,
-#         op_kwargs={'dag_config': dag_config},
+#         op_kwargs={'dag_config': _dag_config},
 #         retries=3,
 #         retry_delay=timedelta(minutes=5),
 #     )
 #
 #     push_tasks = []
-#     for interval_def in interval_defs:
-#         minutes = int(interval_def.get('minutes'))
-#         table_name = interval_def.get('table_name')
+#     for c_task in push_task_configs:
+#         resolution = c_task.get('resolution')
+#         table_name = c_task.get('table_name')
 #         if table_name is None:
 #             raise ValueError("Each interval config must include 'table_name'.")
-#
-#         interval_label = _to_interval_label(minutes)
 #         push_tasks.append(
 #             PythonOperator(
-#                 task_display_name=f"Push {interval_label} VN30 Derivative Data to ClickHouse",
-#                 task_id=f"push_vn30d_{interval_label.lower()}_to_clickhouse",
+#                 task_display_name=f"Push {resolution} Stock Data to ClickHouse",
+#                 task_id=f"push_stock_{resolution.lower()}_to_clickhouse",
 #                 python_callable=push_to_clickhouse,
-#                 op_kwargs={'interval_minutes': minutes, 'table_name': table_name, 'dag_config': dag_config},
+#                 op_kwargs={'resolution': resolution, 'table_name': table_name, 'dag_config': _dag_config},
 #                 retries=3,
 #                 retry_delay=timedelta(minutes=2),
 #             )
 #         )
 #
 #     download_task >> push_tasks
+#

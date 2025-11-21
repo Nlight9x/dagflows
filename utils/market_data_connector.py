@@ -179,7 +179,7 @@ class VietstockConnector(SecuritiesMarketConnector):
         params['to'] = int(datetime.now().timestamp()) if 'to_timestamp' not in params else params.pop('to_timestamp')
         params['from'] = params['to'] - 86400 if 'from_timestamp' not in params else params.pop('from_timestamp')
 
-        print(params)
+        # print(params)
         
         response = self._client.get(self._base_url, params=params, headers=self._default_headers)
         response.raise_for_status()

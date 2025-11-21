@@ -493,7 +493,7 @@ class ClickHouseExporter(StorageExporter):
             dates = [dates]
 
         cleaned_dates = []
-        print(dates)
+        # print(dates)
         for value in dates:
             if value is None:
                 continue

@@ -396,6 +396,7 @@ def push_to_clickhouse(resolution, table_name, dag_config, **context):
             if f.get('status') == 'success' and f.get('symbol')
         ]
         dates_to_delete = [from_date.date() + timedelta(days=i) for i in range(1, back_days + 1)]
+        print("Delete old records.")
         exporter.delete_by_symbol_and_date(dates=dates_to_delete, symbols=symbols_to_delete)
 
         for file_info in metadata['downloaded_files']:

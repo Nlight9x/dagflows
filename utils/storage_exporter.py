@@ -457,12 +457,23 @@ class ClickHouseExporter(StorageExporter):
         batch_size = settings.get('batch_size', 1000)
         
         # Execute operation with retry logic
+        total_processed = 0
         for attempt in range(self._retry_count):
             try:
                 # ClickHouse doesn't support upsert natively, so we only do insert
-                total_processed = self._driver.batch_insert(
-                    data, self._table_name, keys=keys, keys_mode=keys_mode, column_mapping=column_mapping
-                )
+                # Split data into batches if batch_size is specified
+                if batch_size and batch_size > 0:
+                    for i in range(0, len(data), batch_size):
+                        batch = data[i:i + batch_size]
+                        batch_processed = self._driver.batch_insert(
+                            batch, self._table_name, keys=keys, keys_mode=keys_mode, column_mapping=column_mapping
+                        )
+                        total_processed += batch_processed
+                else:
+                    # Insert all data at once if batch_size is 0 or None
+                    total_processed = self._driver.batch_insert(
+                        data, self._table_name, keys=keys, keys_mode=keys_mode, column_mapping=column_mapping
+                    )
                 
                 return {
                     "exported_records": total_processed,
@@ -475,11 +486,12 @@ class ClickHouseExporter(StorageExporter):
                 if attempt < self._retry_count - 1:
                     print(f"Retry ClickHouse export, attempt {attempt+2}/{self._retry_count}...")
                     time.sleep(self._retry_delay)
+                    total_processed = 0  # Reset on retry
                 else:
                     print(f"ClickHouse export failed after {self._retry_count} attempts: {e}")
                     raise
         
-        return {"exported_records": 0, "table": self._table_name}
+        return {"exported_records": total_processed, "table": self._table_name}
     
     def close(self):
         """Close the underlying driver connection"""

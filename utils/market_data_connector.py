@@ -6,17 +6,33 @@ from zoneinfo import ZoneInfo
 
 class SecuritiesPriceParser:
 
-    _default_time_sessions = [(time(9, 15), time(11, 30)), (time(13, 0), time(14, 30)), (time(14, 45), time(14, 45))]
+    _hose_time_sessions = [(time(9, 15), time(11, 30)), (time(13, 0), time(14, 30)), (time(14, 45), time(14, 45))]
+    _hose_derivative_time_sessions = [(time(9, 0), time(11, 30)), (time(13, 0), time(14, 30)), (time(14, 45), time(14, 45))]
+    _hnx_time_sessions = [(time(9, 0), time(11, 30)), (time(13, 0), time(14, 30)), (time(14, 45), time(14, 45))]
+    _upcom_time_sessions = [(time(9, 0), time(11, 30)), (time(13, 0), time(15, 0))]
+
     _local_tz = ZoneInfo("Asia/Ho_Chi_Minh")
 
     _resolution_convert_to_diff_time_map = {
         "1m": "T", "5m": "5T", "30m": "30T", "1h": "H", "1d": "D", "1w": "W"
     }
 
+    _time_session_key_map = {
+        "hose_stock": _hose_time_sessions,
+        "hose_derivative": _hose_derivative_time_sessions,
+        "hnx_stock": _hnx_time_sessions,
+        "upcom_stock": _upcom_time_sessions,
+    }
+
     def __init__(self,  **config):
         self._auto_fill_minute_gap = config.get('auto_fill_minute_gap', True)
-        self._session_time = config.get('trading_sessions', self._default_time_sessions)
+        self._session_time = config.get('trading_sessions', self._hose_time_sessions)
         self._local_tz = config.get('local_tz', self._local_tz)
+
+    def _get_session_time(self, exchange):
+        if not exchange or exchange not in self._time_session_key_map:
+            raise ValueError(f"Exchange '{exchange}' not found in time_session_key_map. Available exchanges: {list(self._time_session_key_map.keys())}")
+        return self._time_session_key_map[exchange]
 
     def parse(self, raw_data, symbol=None, **setting) -> pd.DataFrame:
         raise NotImplementedError
@@ -84,13 +100,13 @@ class VietstockParser(SecuritiesPriceParser):
         if self._auto_fill_minute_gap:
             filled_frames = []
             fred = self._resolution_convert_to_diff_time_map.get(resolution.lower(), 'T')
-            # Check if freq is day-based or larger (D, W, M, Y) - no need to loop through sessions
             is_day_based = fred in ['D', 'W', 'M', 'Y'] or (isinstance(fred, str) and any(fred.startswith(x) for x in ['D', 'W', 'M', 'Y']))
+            session_time = self._get_session_time(setting.get('exchange'))
             if not is_day_based:
                 for trading_day in sorted(df['date'].unique()):
                     day_df = df[df['date'] == trading_day]
                     session_ranges = []
-                    for session_start, session_end in self._session_time:
+                    for session_start, session_end in session_time:
                         start_dt = datetime.combine(trading_day, session_start)
                         end_dt = datetime.combine(trading_day, session_end)
                         session_ranges.append(pd.date_range(start_dt, end_dt, freq=fred))
@@ -123,7 +139,7 @@ class SecuritiesMarketConnector:
     def __init__(self,  **setting):
         pass
 
-    def get_history(self, symbol, **params):
+    def get_history(self, symbol, exchange, **params):
         pass
 
 
@@ -186,7 +202,7 @@ class VietstockConnector(SecuritiesMarketConnector):
         
         return response.json()
 
-    def get_history(self, symbol, **params):
+    def get_history(self, symbol, exchange, **params):
         raw = self.get_raw_history(symbol, **params)
-        return self._parser.parse(raw, symbol=symbol, resolution=params['resolution'])
+        return self._parser.parse(raw, symbol=symbol, exchange=exchange, resolution=params['resolution'])
 

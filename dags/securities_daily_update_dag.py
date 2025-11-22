@@ -114,6 +114,10 @@ def _load_dag_base_config(config_var_name):
     if not isinstance(symbols, list) or len(symbols) == 0:
         raise ValueError("DAG config must include non-empty 'symbols' list.")
 
+    exchange = merged.get('exchange')
+    if not exchange:
+        raise ValueError("DAG config must include non-empty 'exchange'.")
+
     base_resolution = merged.get('base_resolution')
     if base_resolution.lower() not in _resolution_convert_map:
         raise ValueError(f"Resolution '{base_resolution}' is invalid!")
@@ -240,6 +244,7 @@ def download_securities_data(dag_config, **context):
     _cleanup_old_shared_data(dag_config, execution_date, keep_days=keep_days)
 
     symbols = dag_config.get('symbols')
+    exchange = dag_config.get('exchange')
     base_resolution = dag_config.get("base_resolution")
 
     from_date, to_date, back_days = _get_data_range_date(dag_config, **context)
@@ -257,7 +262,7 @@ def download_securities_data(dag_config, **context):
 
             try:
                 df = connector.get_history(
-                    symbol=symbol, resolution=base_resolution,
+                    symbol=symbol, exchange=exchange, resolution=base_resolution,
                     from_timestamp=int(from_date.timestamp()), to_timestamp=int(to_date.timestamp()))
 
                 output_filename = f"{symbol}_{date_str}.csv"

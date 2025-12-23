@@ -231,6 +231,6 @@ class VietstockConnector(SecuritiesMarketConnector):
         return self._parser.parse_event(raw_data=raw, symbol=symbol)
 
 
-with VietstockConnector(timeout=30.0) as c:
-    # print(c.get_event('FPT', from_timestamp=1726624800, to_timestamp=2114355600, resolution='1d'))
-    print(c.get_history(tools.get_derivative_underlying_codes(date.today()).get('VN30F1M'), exchange='hose_stock', from_timestamp=1726624800, to_timestamp=2114355600, resolution='1d'))
+# with VietstockConnector(timeout=30.0) as c:
+#     # print(c.get_event('FPT', from_timestamp=1726624800, to_timestamp=2114355600, resolution='1d'))
+#     print(c.get_history(tools.get_derivative_underlying_codes(date.today()).get('VN30F1M'), exchange='hose_stock', from_timestamp=1726624800, to_timestamp=2114355600, resolution='1d'))

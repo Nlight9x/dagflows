@@ -22,6 +22,7 @@ import pandas as pd
 
 from utils.market_data_connector import VietstockConnector
 from utils.storage_exporter import ClickHouseExporter
+from utils import tools
 
 
 DEFAULT_DAG_CONFIG = {
@@ -35,9 +36,18 @@ DEFAULT_DAG_CONFIG = {
     "export_batch_size": 1000,
 }
 
+supported_market_type = ["base_stock", "derivative"]
+
 _resolution_convert_map = {
     "1m": 1, "5m": 5, "30m": 30, "1h": 60, "1d": 1440, "1w": 10080
 }
+
+
+def normalize_symbol(market_type, symbol):
+    if 'derivative' == market_type:
+        symbol_map = tools.get_derivative_underlying_codes(date.today())
+        return symbol_map.get(symbol)
+    return symbol
 
 
 def _get_data_date(dag_config, **context):
@@ -118,6 +128,10 @@ def _load_dag_base_config(config_var_name):
     if not exchange:
         raise ValueError("DAG config must include non-empty 'exchange'.")
 
+    market_type = merged.get('market_type')
+    if not market_type and market_type not in supported_market_type:
+        raise ValueError(f"DAG config 'market_type={market_type}' is invalid.")
+
     base_resolution = merged.get('base_resolution')
     if base_resolution.lower() not in _resolution_convert_map:
         raise ValueError(f"Resolution '{base_resolution}' is invalid!")
@@ -187,44 +201,6 @@ def _cleanup_old_shared_data(dag_config, current_date, keep_days=5):
             print(f"Removed old data directory: {dir_path}")
 
 
-def _get_symbol_ticket_of_vn30d(due_month=0):
-    now = datetime.now()
-    # Tìm ngày thứ 5 lần thứ 3 trong tháng hiện tại
-    first_day = now.replace(day=1)
-    weekday_count = 0
-    expiry_day = None
-    for i in range(31):
-        d = first_day + timedelta(days=i)
-        if d.month != now.month:
-            break
-        if d.weekday() == 3:  # Thứ 5 (Monday=0)
-            weekday_count += 1
-            if weekday_count == 3:
-                expiry_day = d
-                break
-    # Nếu đã qua ngày đáo hạn, chuyển sang tháng sau
-    if now.date() > expiry_day.date():
-        base_month = now + dateutil.relativedelta.relativedelta(months=1)
-    else:
-        base_month = now
-    # Cộng thêm due_month nếu có
-    base_month = base_month + dateutil.relativedelta.relativedelta(months=due_month)
-    year = base_month.year
-    month = base_month.month
-    # Map năm sang ký tự quy ước
-    year_map = "ABCDEFGHIJKLMNPQRSTVWXYZ0123456789"
-    base_year = 2020
-    year_idx = (year - base_year) % len(year_map)
-    year_code = year_map[year_idx]
-    # Map tháng sang ký tự quy ước (1-9, A, B, C)
-    if 1 <= month <= 9:
-        month_code = str(month)
-    else:
-        month_code = chr(ord('A') + (month - 10))  # 10->A, 11->B, 12->C
-    symbol = f"41I1{year_code}{month_code}000"
-    return symbol
-
-
 def download_securities_data(dag_config, **context):
     """
     Download securities data from multiple connectors (Vietstock, future: other connectors)
@@ -243,8 +219,10 @@ def download_securities_data(dag_config, **context):
     os.makedirs(data_dir, exist_ok=True)
     _cleanup_old_shared_data(dag_config, execution_date, keep_days=keep_days)
 
-    symbols = dag_config.get('symbols')
+    symbols = [normalize_symbol(dag_config.get('market_type'), s) for s in dag_config.get('symbols')]
     exchange = dag_config.get('exchange')
+    # market_type = dag_config.get('market_type')
+
     base_resolution = dag_config.get("base_resolution")
 
     from_date, to_date, back_days = _get_data_range_date(dag_config, **context)
@@ -469,11 +447,7 @@ def render_dag(dag_id, **config):
     _param_defaults = _get_param_defaults_from_base_config(_dag_config)
 
     with DAG(
-        # dag_display_name="[Securities] Update Stock Price ",
         dag_id=_DAG_ID,
-        # start_date=datetime(2025, 1, 1, tzinfo=local_tz),
-        # schedule="0 15 * * 1-5",  # Mon-Fri at 15:00 (after market close)
-        # catchup=False,
         params={
             "base_resolution": Param(
                 default=_param_defaults.get("base_resolution", "1m"),
@@ -555,78 +529,10 @@ dag_2 = render_dag(
     catchup=False,
 )
 
-
-
-# # Define the DAG
-# # Load param defaults from Variable before DAG definition
-# _DAG_ID = 'daily_update_stock_price'
-# _DAG_CONFIG_VAR_NAME = f"dag_config_{_DAG_ID}"
-# _dag_config = _load_dag_base_config(_DAG_CONFIG_VAR_NAME)
-# _param_defaults = _get_param_defaults_from_base_config(_dag_config)
-#
-#
-# with DAG(
-#     dag_display_name="[Securities] Update Stock Price ",
-#     dag_id=_DAG_ID,
-#     start_date=datetime(2025, 1, 1, tzinfo=local_tz),
-#     schedule="0 15 * * 1-5",  # Mon-Fri at 15:00 (after market close)
-#     catchup=False,
-#     params={
-#         "base_resolution": Param(
-#             default=_param_defaults.get("base_resolution", "1m"),
-#             type="string",
-#             description="Base resolution for data download (e.g., 1m, 5m, 1d)"
-#         ),
-#         "data_date": Param(
-#             default=_param_defaults.get("data_date"),
-#             type=["string", "null"],
-#             format='date',
-#             description="Specific date to download (YYYY-MM-DD). If null, uses execution date"
-#         ),
-#         "back_days": Param(
-#             default=_param_defaults.get("back_days", 1),
-#             type="integer",
-#             description="Number of days to go back from data_date"
-#         ),
-#         "download_wait_seconds": Param(
-#             default=_param_defaults.get("download_wait_seconds", 2),
-#             type="number",
-#             description="Wait time between downloads (seconds)"
-#         ),
-#         "symbols": Param(
-#             default=_param_defaults.get("symbols", []),
-#             type="array",
-#             description="List of stock symbols to download"
-#         ),
-#     }
-# ) as dag:
-#     push_task_configs = _dag_config.get('push_task_configs', [])
-#
-#     download_task = PythonOperator(
-#         task_display_name="Download Stock Data",
-#         task_id="download_securities_data",
-#         python_callable=download_securities_data,
-#         op_kwargs={'dag_config': _dag_config},
-#         retries=3,
-#         retry_delay=timedelta(minutes=5),
-#     )
-#
-#     push_tasks = []
-#     for c_task in push_task_configs:
-#         resolution = c_task.get('resolution')
-#         table_name = c_task.get('table_name')
-#         if table_name is None:
-#             raise ValueError("Each interval config must include 'table_name'.")
-#         push_tasks.append(
-#             PythonOperator(
-#                 task_display_name=f"Push {resolution} Stock Data to ClickHouse",
-#                 task_id=f"push_stock_{resolution.lower()}_to_clickhouse",
-#                 python_callable=push_to_clickhouse,
-#                 op_kwargs={'resolution': resolution, 'table_name': table_name, 'dag_config': _dag_config},
-#                 retries=3,
-#                 retry_delay=timedelta(minutes=2),
-#             )
-#         )
-#
-#     download_task >> push_tasks
-#
+dag_3 = render_dag(
+    dag_id='update_vn30d_stock_price',
+    dag_display_name="[Securities] Update HNX VN30 Derivative Price ",
+    start_date=datetime(2025, 1, 1, tzinfo=local_tz),
+    schedule="0 16 * * 1-5",  # Mon-Fri at 15:00 (after market close)
+    catchup=False,
+)

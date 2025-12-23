@@ -1,13 +1,16 @@
 import httpx
 import pandas as pd
-from datetime import datetime, timedelta, date, time
+from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
+from utils import tools
+
+
+supported_market_type = ["base_stock", "derivative"]
 
 
 class SecuritiesPriceParser:
 
     _hose_time_sessions = [(time(9, 15), time(11, 30)), (time(13, 0), time(14, 30)), (time(14, 45), time(14, 45))]
-    _hose_derivative_time_sessions = [(time(9, 0), time(11, 30)), (time(13, 0), time(14, 30)), (time(14, 45), time(14, 45))]
     _hnx_time_sessions = [(time(9, 0), time(11, 30)), (time(13, 0), time(14, 30)), (time(14, 45), time(14, 45))]
     _upcom_time_sessions = [(time(9, 0), time(11, 30)), (time(13, 0), time(15, 0))]
 
@@ -19,9 +22,9 @@ class SecuritiesPriceParser:
 
     _time_session_key_map = {
         "hose_stock": _hose_time_sessions,
-        "hose_derivative": _hose_derivative_time_sessions,
+        "hnx_derivative": _hnx_time_sessions,
         "hnx_stock": _hnx_time_sessions,
-        "upcom_stock": _upcom_time_sessions,
+        "upcom_stock": _upcom_time_sessions
     }
 
     def __init__(self,  **config):
@@ -42,26 +45,19 @@ class VietstockParser(SecuritiesPriceParser):
     def __init__(self, **config):
         super().__init__(**config)
 
-    def parse(self, raw_data, symbol=None, resolution=None, **setting) -> pd.DataFrame:
+    def parse_history(self, raw_data, symbol=None, resolution=None, **setting) -> pd.DataFrame:
         if not raw_data:
             columns = ['symbol', 'timestamp', 'datetime', 'open', 'high', 'low', 'close', 'volume', 'date']
             return pd.DataFrame(columns=columns)
 
         if isinstance(raw_data, dict) and 't' in raw_data:
-            timestamps = raw_data.get('t', [])
-            opens = raw_data.get('o', [])
-            highs = raw_data.get('h', [])
-            lows = raw_data.get('l', [])
-            closes = raw_data.get('c', [])
-            volumes = raw_data.get('v', [])
-
             df = pd.DataFrame({
-                'timestamp': timestamps,
-                'open': opens,
-                'high': highs,
-                'low': lows,
-                'close': closes,
-                'volume': volumes,
+                'timestamp': raw_data.get('t', []),
+                'open': raw_data.get('o', []),
+                'high': raw_data.get('h', []),
+                'low': raw_data.get('l', []),
+                'close': raw_data.get('c', []),
+                'volume': raw_data.get('v', []),
             })
         elif isinstance(raw_data, list):
             df = pd.DataFrame(raw_data)
@@ -134,6 +130,16 @@ class VietstockParser(SecuritiesPriceParser):
         df = df[['symbol', 'timestamp', 'datetime', 'open', 'high', 'low', 'close', 'volume', 'date']]
         return df
 
+    def parse_event(self, raw_data, symbol):
+        df = pd.DataFrame(raw_data)
+        df['timestamp'] = df['time']
+        df['datetime'] = pd.to_datetime(df['timestamp'], unit='s', utc=True) \
+            .dt.tz_convert(self._local_tz).dt.tz_localize(None)
+        df['symbol'] = symbol
+        df['event'] = df['text']
+
+        return df[['timestamp', 'datetime', 'symbol', 'event']]
+
 
 class SecuritiesMarketConnector:
     def __init__(self,  **setting):
@@ -146,7 +152,8 @@ class SecuritiesMarketConnector:
 class VietstockConnector(SecuritiesMarketConnector):
     """Connector for Vietstock API to download stock market data"""
     
-    _base_url = "https://api.vietstock.vn/tvnew/history"
+    _base_history_url = "https://api.vietstock.vn/tvnew/history"
+    _base_event_url = "https://api.vietstock.vn/tvnew/marks"
     _default_headers = {
         'Accept': '*/*',
         'Origin': 'https://stockchart.vietstock.vn',
@@ -180,29 +187,50 @@ class VietstockConnector(SecuritiesMarketConnector):
         """Context manager exit"""
         if self._client:
             self._client.close()
+
+    def _to_base_request_param(self, symbol, **params):
+        base_resolution = params.get('resolution', '').lower()
+        if base_resolution not in self._resolution_convert_map:
+            raise ValueError(f"Resolution '{params['resolution']}' is invalid!")
+        rq_params = {
+            'symbol': symbol,
+            'resolution': self._resolution_convert_map.get(base_resolution),
+            'to': int(datetime.now().timestamp()) if 'to_timestamp' not in params else params.get('to_timestamp')}
+        rq_params['from'] = rq_params['to'] - 86400 if 'from_timestamp' not in params else params.pop('from_timestamp')
+
+        return rq_params
     
     def get_raw_history(self, symbol, **params):
 
         if self._client is None:
             raise RuntimeError("Client not initialized. Use VietstockConnector as context manager.")
 
-        base_resolution = params['resolution'].lower()
-        if base_resolution not in self._resolution_convert_map:
-            raise ValueError(f"Resolution '{params['resolution']}' is invalid!")
-
-        params['symbol'] = symbol
-        params['resolution'] = self._resolution_convert_map.get(base_resolution)
-        params['to'] = int(datetime.now().timestamp()) if 'to_timestamp' not in params else params.pop('to_timestamp')
-        params['from'] = params['to'] - 86400 if 'from_timestamp' not in params else params.pop('from_timestamp')
-
-        # print(params)
-        
-        response = self._client.get(self._base_url, params=params, headers=self._default_headers)
+        rq_params = self._to_base_request_param(symbol, **params)
+        response = self._client.get(self._base_history_url, params=rq_params, headers=self._default_headers)
         response.raise_for_status()
         
         return response.json()
 
     def get_history(self, symbol, exchange, **params):
         raw = self.get_raw_history(symbol, **params)
-        return self._parser.parse(raw, symbol=symbol, exchange=exchange, resolution=params['resolution'])
+        return self._parser.parse_history(raw, symbol=symbol, exchange=exchange, resolution=params['resolution'])
 
+    def get_raw_event(self, symbol, **params):
+        if self._client is None:
+            raise RuntimeError("Client not initialized. Use VietstockConnector as context manager.")
+
+        rq_params = self._to_base_request_param(symbol, **params)
+
+        response = self._client.get(self._base_event_url, params=rq_params, headers=self._default_headers)
+        response.raise_for_status()
+
+        return response.json()
+
+    def get_event(self, symbol, **params):
+        raw = self.get_raw_event(symbol, **params)
+        return self._parser.parse_event(raw_data=raw, symbol=symbol)
+
+
+with VietstockConnector(timeout=30.0) as c:
+    # print(c.get_event('FPT', from_timestamp=1726624800, to_timestamp=2114355600, resolution='1d'))
+    print(c.get_history(tools.get_derivative_underlying_codes(date.today()).get('VN30F1M'), exchange='hose_stock', from_timestamp=1726624800, to_timestamp=2114355600, resolution='1d'))

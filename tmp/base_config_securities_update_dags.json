@@ -8,6 +8,7 @@
     "data_dir_keep_days": 5,
     "download_wait_seconds": 2,
     "symbols": ["ACB", "BCM", "BID", "CTG", "DGC", "FPT", "GAS", "GVR", "HDB", "HPG", "LPB", "MBB", "MSN", "MWG", "PLX", "SAB", "SHB", "SSB", "SSI", "STB", "TCB", "TPB", "VCB", "VHM", "VIB", "VIC", "VJC", "VNM", "VPB", "VRE", "AAA", "AGG", "ANV", "ASM", "BCG", "BMP", "BSI", "BWE", "CII", "CMG", "CRE", "CTD", "CTR", "CTS", "DBC", "DCM", "DGW", "DHC", "DIG", "DPM", "DSE", "DXG", "DXS", "EIB", "EVF", "FRT", "FTS", "GEX", "GMD", "HAG", "HCM", "HDC", "HDG", "HHV", "HSG", "HT1", "IMP", "KBC", "KDC", "KDH", "KOS", "MSB", "NAB", "NKG", "NLG", "NT2", "NVL", "OCB", "PAN", "PC1", "PDR", "PHR", "PNJ", "POW", "PPC", "PTB", "PVD", "PVT", "REE", "SBT", "SCS", "SIP", "SJS", "SZC", "TCH", "TLG", "VCG", "VCI", "VGC", "VHC", "VIX", "VND", "VPI", "VSH", "VTP"],
+    "exchange": "hose_stock",
     "clickhouse_connection_config": {
         "host": "my-clickhouse.clickhouse.svc.cluster.local",
         "port": "9000",

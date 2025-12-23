@@ -533,6 +533,6 @@ dag_3 = render_dag(
     dag_id='update_vn30d_stock_price',
     dag_display_name="[Securities] Update HNX VN30 Derivative Price ",
     start_date=datetime(2025, 1, 1, tzinfo=local_tz),
-    schedule="0 16 * * 1-5",  # Mon-Fri at 15:00 (after market close)
+    schedule="0 17 * * 1-5",  # Mon-Fri at 15:00 (after market close)
     catchup=False,
 )

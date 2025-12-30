@@ -232,5 +232,7 @@ class VietstockConnector(SecuritiesMarketConnector):
 
 
 # with VietstockConnector(timeout=30.0) as c:
-#     # print(c.get_event('FPT', from_timestamp=1726624800, to_timestamp=2114355600, resolution='1d'))
-#     print(c.get_history(tools.get_derivative_underlying_codes(date.today()).get('VN30F1M'), exchange='hose_stock', from_timestamp=1726624800, to_timestamp=2114355600, resolution='1d'))
+#     df = c.get_event('FPT', from_timestamp=1726624800, to_timestamp=2114355600, resolution='1d')
+#     with pd.option_context('display.max_rows', None, 'display.max_columns', None, 'display.width', None):
+#         print(df)
+    # print(c.get_history(tools.get_derivative_underlying_codes(date.today()).get('VN30F1M'), exchange='hose_stock', from_timestamp=1726624800, to_timestamp=2114355600, resolution='1d'))

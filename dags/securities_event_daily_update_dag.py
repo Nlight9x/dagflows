@@ -251,8 +251,8 @@ def push_event_to_clickhouse(table_name, dag_config, **context):
             # Event data doesn't need aggregation, just ensure symbol and date columns exist
             if 'symbol' not in df.columns:
                 df['symbol'] = symbol
-            if 'date' not in df.columns:
-                df['date'] = pd.to_datetime(df['datetime']).dt.date
+            # if 'date' not in df.columns:
+            #     df['date'] = pd.to_datetime(df['datetime']).dt.date
 
             if df.empty:
                 continue

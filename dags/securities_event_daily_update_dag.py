@@ -346,7 +346,7 @@ dag_1 = render_dag(
     dag_id='update_hose_stock_events',
     dag_display_name="[Securities] Update HOSE Stock Event",
     start_date=datetime(2025, 1, 1, tzinfo=local_tz),
-    schedule="0 15 * * 1-5",  # Mon-Fri at 15:00 (after market close)
+    schedule="10 9 * * 1-5",  # Mon-Fri at 15:00 (after market close)
     catchup=False,
 )
 

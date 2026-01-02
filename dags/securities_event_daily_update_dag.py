@@ -344,9 +344,16 @@ local_tz = pendulum.timezone("Asia/Ho_Chi_Minh")
 
 dag_1 = render_dag(
     dag_id='update_hose_stock_events',
-    dag_display_name="[Securities] Update HOSE Stock Event",
+    dag_display_name="[Securities] Update HOSE Stock Events",
     start_date=datetime(2025, 1, 1, tzinfo=local_tz),
     schedule="10 9 * * 1-5",  # Mon-Fri at 15:00 (after market close)
     catchup=False,
 )
 
+dag_2 = render_dag(
+    dag_id='update_hnx_stock_events',
+    dag_display_name="[Securities] Update HNX Stock Events",
+    start_date=datetime(2025, 1, 1, tzinfo=local_tz),
+    schedule="20 9 * * 1-5",  # Mon-Fri at 15:00 (after market close)
+    catchup=False,
+)

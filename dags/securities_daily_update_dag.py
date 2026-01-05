@@ -321,7 +321,7 @@ def aggregate_minute_records(records: pd.DataFrame, minute_resolution):
     return resampled[['datetime', 'timestamp', 'open', 'high', 'low', 'close', 'volume']]
 
 
-def export_records_to_clickhouse(exporter, records_df: pd.DataFrame, batch_size=1000):
+def export_records_to_clickhouse(exporter, records_df: pd.DataFrame, batch_size=1000, **settings):
     """Export a dataframe to ClickHouse table using ClickHouseExporter"""
     if records_df is None or records_df.empty:
         return {'exported_records': 0, 'status': 'skipped'}
@@ -330,9 +330,7 @@ def export_records_to_clickhouse(exporter, records_df: pd.DataFrame, batch_size=
         return exporter.export(
             data=records,
             batch_size=batch_size,
-            column_mapping=None,
-            keys=None,
-            keys_mode='include'
+            **settings
         )
     finally:
         exporter.close()

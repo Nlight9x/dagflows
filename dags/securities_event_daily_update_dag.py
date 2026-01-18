@@ -17,6 +17,7 @@ import pendulum
 import pandas as pd
 from utils.market_data_connector import VietstockConnector
 from utils.storage_exporter import ClickHouseExporter
+from utils.alert_connector import TelegramAlert
 
 # Import shared helper functions from securities_daily_update_dag
 from dags.securities_daily_update_dag import (
@@ -281,6 +282,141 @@ def push_event_to_clickhouse(table_name, dag_config, **context):
     return summary
 
 
+def notify_telegram_event(dag_config, **context):
+    """
+    Send Telegram notification if there are new events for the day
+    Reads event data from downloaded files and sends notification if events found
+    """
+    dag_config = _to_runtime_dag_config(dag_config, **context)
+    
+    # Get Telegram config from dag_config
+    telegram_config = dag_config.get('telegram_config', {})
+    bot_token = telegram_config.get('bot_token')
+    chat_id = telegram_config.get('chat_id')
+    
+    if not bot_token or not chat_id:
+        print("⚠️  Telegram config not found in dag_config. Skipping notification.")
+        print("   Add 'telegram_config' with 'bot_token' and 'chat_id' to enable notifications.")
+        return None
+    
+    from_date, to_date, back_days = _get_data_range_date(dag_config, **context)
+    data_dir = _get_data_dir(dag_config, to_date)
+    date_str = to_date.strftime("%Y-%m-%d")
+    
+    metadata_path = os.path.join(data_dir, "event_metadata.json") if data_dir else None
+    if not metadata_path or not os.path.exists(metadata_path):
+        print("⚠️  Metadata file not found. Skipping notification.")
+        return None
+    
+    with open(metadata_path, 'r', encoding='utf-8') as f:
+        metadata = json.load(f)
+    
+    print(f"Checking for new events on {date_str}...")
+    
+    # Collect events from all symbols for the target date
+    all_events = []
+    target_date = to_date.date()
+    
+    for file_info in metadata.get('downloaded_files', []):
+        if file_info.get('status') != 'success':
+            continue
+        
+        file_path = file_info.get('file_path')
+        if not file_path or not os.path.exists(file_path):
+            continue
+        
+        symbol = file_info.get('symbol', 'UNKNOWN')
+        
+        try:
+            if not file_path.endswith('.csv'):
+                continue
+            
+            df = pd.read_csv(file_path, parse_dates=['datetime'])
+            if df.empty:
+                continue
+            
+            # Filter events for the target date
+            df['date'] = pd.to_datetime(df['datetime']).dt.date
+            day_events = df[df['date'] == target_date]
+            
+            if not day_events.empty:
+                for _, row in day_events.iterrows():
+                    all_events.append({
+                        'symbol': symbol,
+                        'datetime': row.get('datetime'),
+                        'event': row.get('event', 'N/A')
+                    })
+        
+        except Exception as e:
+            print(f"Error reading event file {file_path}: {e}")
+            continue
+    
+    # If no events found, skip notification
+    if not all_events:
+        print(f"✓ No new events found for {date_str}. Notification skipped.")
+        return None
+    
+    # Format message for Telegram
+    event_count = len(all_events)
+    message_lines = [
+        f"📢 <b>New Stock Events - {date_str}</b>",
+        f"",
+        f"Found <b>{event_count}</b> event(s):",
+        f""
+    ]
+    
+    # Group events by symbol for better readability
+    events_by_symbol = {}
+    for event in all_events:
+        symbol = event['symbol']
+        if symbol not in events_by_symbol:
+            events_by_symbol[symbol] = []
+        events_by_symbol[symbol].append(event)
+    
+    # Format events by symbol
+    for symbol, symbol_events in events_by_symbol.items():
+        message_lines.append(f"<b>{symbol}</b> ({len(symbol_events)} event(s)):")
+        for event in symbol_events:
+            event_time = pd.to_datetime(event['datetime']).strftime("%H:%M")
+            event_text = event['event']
+            # Truncate long event text
+            if len(event_text) > 100:
+                event_text = event_text[:97] + "..."
+            message_lines.append(f"  • {event_time}: {event_text}")
+        message_lines.append("")
+    
+    message_text = "\n".join(message_lines)
+    
+    # Send notification via Telegram
+    try:
+        telegram = TelegramAlert(
+            bot_token=bot_token,
+            chat_id=chat_id,
+            parse_mode="HTML"
+        )
+        
+        result = telegram.send_message(message_text)
+        print(f"✓ Telegram notification sent successfully! Message ID: {result.get('message_id')}")
+        print(f"  Notified about {event_count} event(s) for {date_str}")
+        
+        return {
+            'date': date_str,
+            'event_count': event_count,
+            'symbols_with_events': list(events_by_symbol.keys()),
+            'message_id': result.get('message_id'),
+            'status': 'success'
+        }
+    
+    except Exception as e:
+        print(f"❌ Error sending Telegram notification: {e}")
+        return {
+            'date': date_str,
+            'event_count': event_count,
+            'status': 'failed',
+            'error': str(e)
+        }
+
+
 def render_dag(dag_id, **config):
     _DAG_ID = dag_id
     _DAG_CONFIG_VAR_NAME = f"dag_config_{_DAG_ID}"
@@ -323,6 +459,16 @@ def render_dag(dag_id, **config):
             retry_delay=timedelta(minutes=5),
         )
 
+        # Telegram notification task (runs after download)
+        notify_task = PythonOperator(
+            task_display_name="Notify Telegram if New Events",
+            task_id="notify_telegram_event",
+            python_callable=notify_telegram_event,
+            op_kwargs={'dag_config': _dag_config},
+            retries=1,
+            retry_delay=timedelta(minutes=1),
+        )
+
         push_task_config = _dag_config.get('push_task_config', {})
         table_name = push_task_config.get('table_name')
         if table_name:
@@ -334,7 +480,9 @@ def render_dag(dag_id, **config):
                 retries=3,
                 retry_delay=timedelta(minutes=2),
             )
-            download_task >> push_task
+            download_task >> notify_task >> push_task
+        else:
+            download_task >> notify_task
 
     return dag
 

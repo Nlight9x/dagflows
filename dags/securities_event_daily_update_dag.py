@@ -290,7 +290,7 @@ def notify_telegram_event(dag_config, **context):
     dag_config = _to_runtime_dag_config(dag_config, **context)
     
     # Get Telegram config from dag_config
-    telegram_config = dag_config.get('telegram_config', {})
+    telegram_config = dag_config.get('alert_config', {})
     bot_token = telegram_config.get('bot_token')
     chat_id = telegram_config.get('chat_id')
     

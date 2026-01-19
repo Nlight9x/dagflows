@@ -43,9 +43,9 @@ _resolution_convert_map = {
 }
 
 
-def normalize_symbol(market_type, symbol):
+def normalize_symbol(market_type, symbol, c_date=date.today()):
     if 'derivative' == market_type:
-        symbol_map = tools.get_derivative_underlying_codes(date.today())
+        symbol_map = tools.get_derivative_underlying_codes(c_date)
         return symbol_map.get(symbol)
     return symbol
 
@@ -219,7 +219,7 @@ def download_securities_data(dag_config, **context):
     os.makedirs(data_dir, exist_ok=True)
     _cleanup_old_shared_data(dag_config, execution_date, keep_days=keep_days)
 
-    symbols = [normalize_symbol(dag_config.get('market_type'), s) for s in dag_config.get('symbols')]
+    symbols = [normalize_symbol(dag_config.get('market_type'), s, execution_date) for s in dag_config.get('symbols')]
     exchange = dag_config.get('exchange')
     # market_type = dag_config.get('market_type')
 

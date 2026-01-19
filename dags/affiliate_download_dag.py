@@ -391,12 +391,13 @@ with DAG(
         # provide_context=True,
     )
 
-    export_tripcom_to_postgres_task = PythonOperator(
-        task_display_name="Download Trip.com conversions",
-        task_id="get_and_save_tripcom_data_to_postgres",
-        python_callable=download_and_export_postgres_tripcom_data,
-        # provide_context=True,
-        retries=3,
-        retry_delay=timedelta(minutes=2),
-    )
-    export_galaksion_to_nocodb_task >> export_involve_to_nocodb_task >> export_tripcom_to_postgres_task
+    # export_tripcom_to_postgres_task = PythonOperator(
+    #     task_display_name="Download Trip.com conversions",
+    #     task_id="get_and_save_tripcom_data_to_postgres",
+    #     python_callable=download_and_export_postgres_tripcom_data,
+    #     # provide_context=True,
+    #     retries=3,
+    #     retry_delay=timedelta(minutes=2),
+    # )
+    export_galaksion_to_nocodb_task >> export_involve_to_nocodb_task
+    # >> export_tripcom_to_postgres_task

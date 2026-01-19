@@ -143,7 +143,6 @@ class VietstockParser(SecuritiesPriceParser):
         return df[columns]
 
 
-
 class SecuritiesMarketConnector:
     def __init__(self,  **setting):
         pass

@@ -49,8 +49,9 @@ def get_derivative_underlying_codes(base_date: date):
     }
 
 
-# cur_date = date(2025, 12, 19)
-# print(get_derivative_underlying_codes(cur_date))
+if __name__ == "__main__":
+    cur_date = date(2026, 1, 19)
+    print(get_derivative_underlying_codes(cur_date))
 
 # list_due = get_list_derivative_due_month(cur_date)
 #

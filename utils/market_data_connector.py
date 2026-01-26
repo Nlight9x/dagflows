@@ -27,8 +27,10 @@ class SecuritiesPriceParser:
         "upcom_stock": _upcom_time_sessions
     }
 
+    _column_format = ['symbol', 'timestamp', 'datetime', 'open', 'high', 'low', 'close', 'volume', 'date']
+
     def __init__(self,  **config):
-        self._auto_fill_minute_gap = config.get('auto_fill_minute_gap', True)
+        self._is_auto_fill_minute_gap = config.get('auto_fill_minute_gap', True)
         self._session_time = config.get('trading_sessions', self._hose_time_sessions)
         self._local_tz = config.get('local_tz', self._local_tz)
 
@@ -36,6 +38,45 @@ class SecuritiesPriceParser:
         if not exchange or exchange not in self._time_session_key_map:
             raise ValueError(f"Exchange '{exchange}' not found in time_session_key_map. Available exchanges: {list(self._time_session_key_map.keys())}")
         return self._time_session_key_map[exchange]
+
+    def _auto_fill_minute_gap(self, df, symbol=None, resolution=None, **setting):
+        fred = self._resolution_convert_to_diff_time_map.get(resolution.lower(), 'T')
+        is_day_based = fred in ['D', 'W', 'M', 'Y'] or (
+                    isinstance(fred, str) and any(fred.startswith(x) for x in ['D', 'W', 'M', 'Y']))
+
+        if not is_day_based:
+            filled_frames = []
+            session_time = self._get_session_time(setting.get('exchange'))
+            for trading_day in sorted(df['date'].unique()):
+                day_df = df[df['date'] == trading_day]
+                session_ranges = []
+                for session_start, session_end in session_time:
+                    start_dt = datetime.combine(trading_day, session_start)
+                    end_dt = datetime.combine(trading_day, session_end)
+                    session_ranges.append(pd.date_range(start_dt, end_dt, freq=fred))
+
+                if session_ranges:
+                    expected_index = pd.DatetimeIndex(sorted(set().union(*session_ranges)))
+                    # Drop duplicates by datetime before set_index to avoid "duplicate labels" error
+                    # Keep last occurrence (most recent data)
+                    day_df = day_df.drop_duplicates(subset='datetime', keep='last')
+                    day_df = day_df.set_index('datetime').reindex(expected_index)
+                    day_df['symbol'] = day_df['symbol'].fillna(symbol)
+                    day_df['timestamp'] = (day_df.index.view('int64') // 10**9).astype(int)
+                    day_df['volume'] = day_df['volume'].fillna(0)
+                    # Forward fill
+                    day_df['close'] = day_df['close'].ffill()
+                    day_df['open'] = day_df['open'].fillna(day_df['close'])
+                    day_df['high'] = day_df['high'].fillna(day_df['close'])
+                    day_df['low'] = day_df['low'].fillna(day_df['close'])
+                    day_df['date'] = trading_day
+                    day_df = day_df.reset_index().rename(columns={'index': 'datetime'})
+                else:
+                    day_df = day_df.reset_index(drop=True)
+
+                filled_frames.append(day_df)
+            return pd.concat(filled_frames, ignore_index=True)
+        return df
 
     def parse(self, raw_data, symbol=None, **setting) -> pd.DataFrame:
         raise NotImplementedError
@@ -47,8 +88,7 @@ class VietstockParser(SecuritiesPriceParser):
 
     def parse_history(self, raw_data, symbol=None, resolution=None, **setting) -> pd.DataFrame:
         if not raw_data:
-            columns = ['symbol', 'timestamp', 'datetime', 'open', 'high', 'low', 'close', 'volume', 'date']
-            return pd.DataFrame(columns=columns)
+            return pd.DataFrame(columns=self._column_format)
 
         if isinstance(raw_data, dict) and 't' in raw_data:
             df = pd.DataFrame({
@@ -65,7 +105,7 @@ class VietstockParser(SecuritiesPriceParser):
             df = pd.DataFrame()
 
         if df.empty:
-            columns = ['symbol', 'timestamp', 'datetime', 'open', 'high', 'low', 'close', 'volume', 'date']
+            columns = self._column_format
             return pd.DataFrame(columns=columns)
 
         if 'timestamp' not in df.columns:
@@ -74,6 +114,7 @@ class VietstockParser(SecuritiesPriceParser):
             else:
                 raise ValueError("Raw Vietstock data must include 'timestamp' column")
 
+        ## CỰC KỲ LƯU Ý CHỖ NÀY. TIMESTAMP Ở ĐÂY ĐÃ ĐƯỢC VIETSTOCK CỘNG SẴN THÊM MÚI GIỜ +7
         df['timestamp'] = df['timestamp'].astype(int)
         df['datetime'] = pd.to_datetime(df['timestamp'], unit='s', utc=True)\
             .dt.tz_convert(self._local_tz).dt.tz_localize(None)
@@ -93,41 +134,43 @@ class VietstockParser(SecuritiesPriceParser):
 
         df['date'] = df['datetime'].dt.date
 
-        if self._auto_fill_minute_gap:
-            filled_frames = []
-            fred = self._resolution_convert_to_diff_time_map.get(resolution.lower(), 'T')
-            is_day_based = fred in ['D', 'W', 'M', 'Y'] or (isinstance(fred, str) and any(fred.startswith(x) for x in ['D', 'W', 'M', 'Y']))
-            session_time = self._get_session_time(setting.get('exchange'))
-            if not is_day_based:
-                for trading_day in sorted(df['date'].unique()):
-                    day_df = df[df['date'] == trading_day]
-                    session_ranges = []
-                    for session_start, session_end in session_time:
-                        start_dt = datetime.combine(trading_day, session_start)
-                        end_dt = datetime.combine(trading_day, session_end)
-                        session_ranges.append(pd.date_range(start_dt, end_dt, freq=fred))
+        if self._is_auto_fill_minute_gap:
+            df = self._auto_fill_minute_gap(df, symbol, resolution, **setting)
 
-                    if session_ranges:
-                        expected_index = pd.DatetimeIndex(sorted(set().union(*session_ranges)))
-                        day_df = day_df.set_index('datetime').reindex(expected_index)
-                        day_df['symbol'] = day_df['symbol'].fillna(symbol)
-                        day_df['timestamp'] = (day_df.index.view('int64') // 10**9).astype(int)
-                        day_df['volume'] = day_df['volume'].fillna(0)
-                        day_df['close'] = day_df['close'].ffill()
-                        day_df['open'] = day_df['open'].fillna(day_df['close'])
-                        day_df['high'] = day_df['high'].fillna(day_df['close'])
-                        day_df['low'] = day_df['low'].fillna(day_df['close'])
-                        day_df['date'] = trading_day
-                        day_df = day_df.reset_index().rename(columns={'index': 'datetime'})
-                    else:
-                        day_df = day_df.reset_index(drop=True)
-
-                    filled_frames.append(day_df)
-                df = pd.concat(filled_frames, ignore_index=True)
+            # filled_frames = []
+            # fred = self._resolution_convert_to_diff_time_map.get(resolution.lower(), 'T')
+            # is_day_based = fred in ['D', 'W', 'M', 'Y'] or (isinstance(fred, str) and any(fred.startswith(x) for x in ['D', 'W', 'M', 'Y']))
+            # session_time = self._get_session_time(setting.get('exchange'))
+            # if not is_day_based:
+            #     for trading_day in sorted(df['date'].unique()):
+            #         day_df = df[df['date'] == trading_day]
+            #         session_ranges = []
+            #         for session_start, session_end in session_time:
+            #             start_dt = datetime.combine(trading_day, session_start)
+            #             end_dt = datetime.combine(trading_day, session_end)
+            #             session_ranges.append(pd.date_range(start_dt, end_dt, freq=fred))
+            #
+            #         if session_ranges:
+            #             expected_index = pd.DatetimeIndex(sorted(set().union(*session_ranges)))
+            #             day_df = day_df.set_index('datetime').reindex(expected_index)
+            #             day_df['symbol'] = day_df['symbol'].fillna(symbol)
+            #             day_df['timestamp'] = (day_df.index.view('int64') // 10**9).astype(int)
+            #             day_df['volume'] = day_df['volume'].fillna(0)
+            #             day_df['close'] = day_df['close'].ffill()
+            #             day_df['open'] = day_df['open'].fillna(day_df['close'])
+            #             day_df['high'] = day_df['high'].fillna(day_df['close'])
+            #             day_df['low'] = day_df['low'].fillna(day_df['close'])
+            #             day_df['date'] = trading_day
+            #             day_df = day_df.reset_index().rename(columns={'index': 'datetime'})
+            #         else:
+            #             day_df = day_df.reset_index(drop=True)
+            #
+            #         filled_frames.append(day_df)
+            #     df = pd.concat(filled_frames, ignore_index=True)
         
         # Reset index to ensure clean 0-based index (after sort_values, index may not be sequential)
         df = df.reset_index(drop=True)
-        df = df[['symbol', 'timestamp', 'datetime', 'open', 'high', 'low', 'close', 'volume', 'date']]
+        df = df[self._column_format]
         return df
 
     def parse_event(self, raw_data, symbol):
@@ -220,18 +263,21 @@ class VietstockConnector(SecuritiesMarketConnector):
     def get_raw_event(self, symbol, **params):
         if self._client is None:
             raise RuntimeError("Client not initialized. Use VietstockConnector as context manager.")
-
+        
         rq_params = self._to_base_request_param(symbol, **params)
 
         response = self._client.get(self._base_event_url, params=rq_params, headers=self._default_headers)
         response.raise_for_status()
-
+        
         return response.json()
 
     def get_event(self, symbol, **params):
         raw = self.get_raw_event(symbol, **params)
         return self._parser.parse_event(raw_data=raw, symbol=symbol)
 
+
+if __name__ == "__main__":
+    pass
 
 # with VietstockConnector(timeout=30.0) as c:
 #     today = int(datetime.now().timestamp())

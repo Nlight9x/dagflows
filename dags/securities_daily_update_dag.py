@@ -39,7 +39,7 @@ DEFAULT_DAG_CONFIG = {
 supported_market_type = ["base_stock", "derivative"]
 
 _resolution_convert_map = {
-    "1m": 1, "5m": 5, "30m": 30, "1h": 60, "1d": 1440, "1w": 10080
+    "1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30, "1h": 60, "2h": 120, "1d": 1440, "1w": 10080
 }
 
 

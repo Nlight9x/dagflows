@@ -17,7 +17,7 @@ class SecuritiesPriceParser:
     _local_tz = ZoneInfo("Asia/Ho_Chi_Minh")
 
     _resolution_convert_to_diff_time_map = {
-        "1m": "T", "5m": "5T", "30m": "30T", "1h": "H", "1d": "D", "1w": "W"
+        "1m": "T", "3m": "3T", "5m": "5T", "15m": "15T", "30m": "30T", "1h": "H", "1d": "D", "1w": "W"
     }
 
     _time_session_key_map = {
@@ -39,7 +39,7 @@ class SecuritiesPriceParser:
             raise ValueError(f"Exchange '{exchange}' not found in time_session_key_map. Available exchanges: {list(self._time_session_key_map.keys())}")
         return self._time_session_key_map[exchange]
 
-    def _auto_fill_minute_gap(self, df, symbol=None, resolution=None, **setting):
+    def auto_fill_minute_gap(self, df, symbol=None, resolution=None, **setting):
         fred = self._resolution_convert_to_diff_time_map.get(resolution.lower(), 'T')
         is_day_based = fred in ['D', 'W', 'M', 'Y'] or (
                     isinstance(fred, str) and any(fred.startswith(x) for x in ['D', 'W', 'M', 'Y']))
@@ -76,6 +76,7 @@ class SecuritiesPriceParser:
 
                 filled_frames.append(day_df)
             return pd.concat(filled_frames, ignore_index=True)
+        print(df.tail(10))
         return df
 
     def parse(self, raw_data, symbol=None, **setting) -> pd.DataFrame:

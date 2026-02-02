@@ -136,7 +136,7 @@ class VietstockParser(SecuritiesPriceParser):
         df['date'] = df['datetime'].dt.date
 
         if self._is_auto_fill_minute_gap:
-            df = self._auto_fill_minute_gap(df, symbol, resolution, **setting)
+            df = self.auto_fill_minute_gap(df, symbol, resolution, **setting)
 
             # filled_frames = []
             # fred = self._resolution_convert_to_diff_time_map.get(resolution.lower(), 'T')

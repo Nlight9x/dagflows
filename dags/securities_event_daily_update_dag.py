@@ -288,7 +288,11 @@ def notify_telegram_event(dag_config, **context):
     Reads event data from downloaded files and sends notification if events found
     """
     dag_config = _to_runtime_dag_config(dag_config, **context)
-    
+
+    dag_mode = dag_config.get('mode')
+    if 'Daily' != dag_mode:
+        print(f"Telegram notification only supports 'Daily' mode. Current mode is '{dag_mode}'")
+        return None
     # Get Telegram config from dag_config
     telegram_config = dag_config.get('alert_config', {})
     bot_token = telegram_config.get('bot_token')
@@ -389,32 +393,18 @@ def notify_telegram_event(dag_config, **context):
     
     # Send notification via Telegram
     try:
-        telegram = TelegramAlert(
-            bot_token=bot_token,
-            chat_id=chat_id,
-            parse_mode="HTML"
-        )
+        telegram = TelegramAlert(bot_token=bot_token, chat_id=chat_id, parse_mode="HTML")
         
         result = telegram.send_message(message_text)
         print(f"✓ Telegram notification sent successfully! Message ID: {result.get('message_id')}")
         print(f"  Notified about {event_count} event(s) for {date_str}")
         
-        return {
-            'date': date_str,
-            'event_count': event_count,
-            'symbols_with_events': list(events_by_symbol.keys()),
-            'message_id': result.get('message_id'),
-            'status': 'success'
-        }
+        return {'date': date_str, 'event_count': event_count, 'symbols_with_events': list(events_by_symbol.keys()),
+                'message_id': result.get('message_id'), 'status': 'success'}
     
     except Exception as e:
         print(f"❌ Error sending Telegram notification: {e}")
-        return {
-            'date': date_str,
-            'event_count': event_count,
-            'status': 'failed',
-            'error': str(e)
-        }
+        return {'date': date_str, 'event_count': event_count, 'status': 'failed', 'error': str(e) }
 
 
 def render_dag(dag_id, **config):

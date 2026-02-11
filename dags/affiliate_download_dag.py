@@ -170,8 +170,8 @@ def download_and_export_nocodb_galaksion_data(**context):
                 
             except Exception as e:
                 print(f"Error getting hoath campaigns: {e}")
-                break
-        
+                raise
+
         print(f"Found {len(campaign_ids)} campaigns with 'hoath': {campaign_ids}")
         return campaign_ids
 

@@ -267,3 +267,23 @@ class ClickHouseExporter(StorageExporter):
             self._driver.execute_query(query, params)
             deleted_count += 1
         return deleted_count
+
+
+if __name__ == "__main__":
+    # noco=NocodbExporter(api_url='http://10.100.0.1:30301/api/v2/tables/mf5hyi4so1dgr1r/records', token='ykYBSOAqBGudSY47K5Z31_RJ08j6e97POz7tvaYQ')
+    noco=NocodbExporter(api_url='http://nocodb.bi-tools.svc.cluster.local/api/v2/tables/mf5hyi4so1dgr1r/records', token='ykYBSOAqBGudSY47K5Z31_RJ08j6e97POz7tvaYQ')
+    noco.export([{
+      "date": "2026-03-29",
+      "clicks": 0,
+      "conversions": 0,
+      "impressions": 0,
+      "money": 0,
+      "cpm": 0,
+      "cpc": 0,
+      "cp": 0,
+      "ctr": 0,
+      "zone": "string",
+      "campaign": "string",
+      "geo": "string",
+      "campaign_id": "string"
+    }])

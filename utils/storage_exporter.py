@@ -37,6 +37,7 @@ class NocodbExporter(StorageExporter):
             while retry < 5:
                 try:
                     resp = httpx.post(self._api_url, headers=headers, json=batch, timeout=30.0)
+                    print(resp.json())
                     resp.raise_for_status()
                     responses.append(resp.json())
                     break  # Thành công thì thoát vòng lặp retry

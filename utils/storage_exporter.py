@@ -8,6 +8,10 @@ from datetime import datetime, date
 from utils.storage_driver import PostgresDriver, ClickHouseDriver
 
 
+class StorageError(RuntimeError):
+    pass
+
+
 class StorageExporter:
     def __init__(self, **config):
         pass
@@ -34,10 +38,11 @@ class NocodbExporter(StorageExporter):
         for i in range(0, total, batch_size):
             batch = data[i:i+batch_size]
             retry = 0
+            resp=None
             while retry < 5:
                 try:
                     resp = httpx.post(self._api_url, headers=headers, json=batch, timeout=30.0)
-                    print(resp.json())
+                    # print(resp.json())
                     resp.raise_for_status()
                     responses.append(resp.json())
                     break  # Thành công thì thoát vòng lặp retry
@@ -48,7 +53,7 @@ class NocodbExporter(StorageExporter):
                         time.sleep(10)
                     else:
                         print(f"Nocodb export failed after 5 attempts: {e}")
-                        raise
+                        raise StorageError(resp.json().get('message', '') if resp else '')
         return responses
 
 

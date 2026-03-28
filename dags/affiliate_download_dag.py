@@ -257,7 +257,7 @@ def download_and_export_nocodb_galaksion_data(**context):
     async def fetch_and_push_galaksion_data():
         connector = GalaksionAsyncConnector(token=galaksion_token)
         limit = 100
-        buffer_size = 500
+        buffer_size = 100
         order_by = {"field": "money", "direction": "desc"}
         group_by = ["day", "campaign", "zone", "geo"]
         exporter = NocodbExporter(api_url=nocodb_api_url, token=nocodb_token)

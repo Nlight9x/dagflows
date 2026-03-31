@@ -4,7 +4,7 @@ import asyncio
 _empty_dict = {}
 
 
-class AsyncConnector:
+class AffAsyncConnector:
     def __init__(self, **config):
         pass
 
@@ -15,7 +15,7 @@ class AsyncConnector:
         pass
 
 
-class InvolveAsyncConnector(AsyncConnector):
+class InvolveAsyncConnector(AffAsyncConnector):
     _default_header = {
         "Accept": "application/json",
         "Content-Type": "application/x-www-form-urlencoded"
@@ -97,7 +97,7 @@ class InvolveAsyncConnector(AsyncConnector):
         return await self._fetch_conversion(self._all_conversion_url, data)
 
 
-class TripComAsyncConnector(AsyncConnector):
+class TripComAsyncConnector(AffAsyncConnector):
 
     _get_conversion_url = 'https://www.trip.com/restapi/soa2/18073/json/getAllianceOrderDetail'
 
@@ -149,13 +149,138 @@ class TripComAsyncConnector(AsyncConnector):
                     raise
         return None, False
 
-# async def test():
-#     x = InvolveAsyncConnector(secret_key="H/hyZnEQyqoInz+gXdV6G6fwMCOuGyoxTnTLZYUCxys=")
-#     await x.authenticate()
-#     # print(x.token())
-#
-#     import exporter
-#     data = await x.get_conversion(page="1", limit="100")
-#     exporter.export_involve_conversion_to_csv("test.csv", data)
-#
-# asyncio.run(test())
+
+class EcomobiAsyncConnector(AffAsyncConnector):
+    _get_conversion_url ='https://api.ecotrackings.com/api/v3/conversions'
+
+    def __init__(self, **config):
+        super().__init__(**config)
+        self._token_private = config.get("token")
+
+    async def get_conversion(self, **params):
+        retry = 0
+        while retry < 3:
+            try:
+                token_private = params.get("token_private") or self._token_private
+                if not token_private:
+                    raise ValueError("Missing token_private. Please pass token_private or set it in connector config.")
+
+                # Only send supported query params; omit None/empty to keep URLs clean.
+                q = {
+                    "token_private": token_private,
+                    "start_date": params.get("start_date"),
+                    "end_date": params.get("end_date"),
+                    "advertiser_id": params.get("advertiser_id"),
+                    "status": params.get("status"),
+                    "adv_order_id": params.get("adv_order_id"),
+                    "limit": params.get("limit", "100"),
+                    "page": params.get("page", "1"),
+                    "currency": params.get("currency"),
+                }
+                q = {k: v for k, v in q.items() if v not in (None, "", [])}
+
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.get(self._get_conversion_url, params=q)
+                    response.raise_for_status()
+                    res_body = response.json()
+
+                # Best-effort extraction: API may return either list or {data: [...], pagination: {...}}
+                data = None
+                if isinstance(res_body, list):
+                    data = res_body
+                elif isinstance(res_body, dict):
+                    if isinstance(res_body.get("data"), list):
+                        data = res_body.get("data")
+                    elif isinstance(res_body.get("conversions"), list):
+                        data = res_body.get("conversions")
+                    elif isinstance(res_body.get("result"), list):
+                        data = res_body.get("result")
+
+                if data is None:
+                    raise Exception(f"Unexpected API response format: {res_body}")
+
+                has_next_page = False
+                if isinstance(res_body, dict):
+                    meta = res_body.get("meta") or {}
+                    if isinstance(meta, dict):
+                        total = meta.get("total")
+                        skip = meta.get("skip")
+                        meta_limit = meta.get("limit")
+                        if total is not None and skip is not None:
+                            try:
+                                has_next_page = int(skip) + len(data) < int(total)
+                            except Exception:
+                                has_next_page = False
+                        elif total is not None and meta_limit is not None:
+                            try:
+                                page = int(q.get("page", 1))
+                                limit = int(meta_limit)
+                                has_next_page = (page * limit) < int(total)
+                            except Exception:
+                                has_next_page = False
+
+                    if not has_next_page:
+                        pagination = res_body.get("pagination") or {}
+                        if isinstance(pagination, dict):
+                            cur_page = pagination.get("page") or pagination.get("current_page") or q.get("page")
+                            last_page = pagination.get("last_page") or pagination.get("total_pages")
+                            if last_page is not None and cur_page is not None:
+                                try:
+                                    has_next_page = int(cur_page) < int(last_page)
+                                except Exception:
+                                    has_next_page = False
+                            elif pagination.get("next_page") is not None or pagination.get("next") is not None:
+                                has_next_page = True
+
+                if not has_next_page:
+                    try:
+                        has_next_page = len(data) >= int(q.get("limit", 10))
+                    except Exception:
+                        has_next_page = bool(data)
+
+                return data, has_next_page
+            except Exception as e:
+                retry += 1
+                if retry < 3:
+                    print(f"Retrying connection to Ecomobi, attempt {retry + 1}/3...")
+                    await asyncio.sleep(10)
+                else:
+                    print(f"Ecomobi connection failed after 3 attempts: {e}")
+                    raise
+        return None, False
+
+
+async def _test_ecomobi():
+    connector = EcomobiAsyncConnector(token="MkxzcGooVxvEmhRUETkms")
+    all_rows = []
+    page = 1
+    limit = 100
+
+    while True:
+        rows, has_next = await connector.get_conversion(
+            start_date="2026-01-01",
+            end_date="2026-03-31",
+            # status="approved",
+            limit=str(limit),
+            page=str(page),
+        )
+        print(f"page={page} rows={len(rows)} has_next={has_next}")
+        all_rows.extend(rows)
+        # break
+        if not has_next:
+            break
+        page += 1
+
+    print(f"TOTAL rows: {len(all_rows)}")
+    if all_rows:
+        # print("FIRST ROW:", all_rows[0])
+        order_ids = set()
+        for r in all_rows:
+            order_ids.add(r.get('adv_order_id'))
+            # print(r)
+            if r.get('sub1') is not None:
+                print(r)
+        print(f"TOTAL set order_id: {len(order_ids)}")
+
+if __name__ == "__main__":
+    asyncio.run(_test_ecomobi())

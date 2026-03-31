@@ -8,7 +8,7 @@ import json
 import httpx
 import pendulum
 
-from utils.affiliate_connector import InvolveAsyncConnector, TripComAsyncConnector
+from utils.affiliate_connector import InvolveAsyncConnector, TripComAsyncConnector, EcomobiAsyncConnector
 from utils.storage_exporter import CsvExporter, NocodbExporter, PostgresSQLExporter
 from utils.ads_network_connector import GalaksionAsyncConnector
 
@@ -366,6 +366,78 @@ def download_and_export_postgres_tripcom_data(**context):
     asyncio.run(fetch_and_export_tripcom_data())
 
 
+def download_and_export_postgres_ecomobi_data(**context):
+    """Download Ecomobi (Ecotrackings) conversions and export to PostgreSQL."""
+    ecomobi_config = json.loads(Variable.get("ecomobi_config", default="{}"))
+    token_private = ecomobi_config.get("token_private")
+
+    postgres_config = Variable.get("postgres_db_connection_info")
+    postgres_config = json.loads(postgres_config)
+
+    table_name = ecomobi_config.get("table_name", "ecomobi_conversions")
+    keys = ecomobi_config.get("keys")
+    keys_mode = ecomobi_config.get("keys_mode", "include")
+    conflict_keys = ecomobi_config.get("conflict_keys", ["_id"])
+    operation_type = ecomobi_config.get("operation_type", "upsert")
+    column_mapping = ecomobi_config.get("column_mapping")
+    limit = int(ecomobi_config.get("limit", 100))
+    status = ecomobi_config.get("status")
+    advertiser_id = ecomobi_config.get("advertiser_id")
+    currency = ecomobi_config.get("currency")
+
+    if not token_private:
+        raise ValueError("Missing 'token_private' in Airflow Variable 'ecomobi_config'.")
+
+    async def fetch_and_export_ecomobi_data():
+        connector = EcomobiAsyncConnector(token_private=token_private)
+
+        data_date = _get_data_date(**context)
+        start_date_str = end_date_str = data_date.strftime("%Y-%m-%d")
+        print(f"Fetching Ecomobi conversions for {start_date_str}")
+
+        exporter = PostgresSQLExporter(table_name=table_name, **postgres_config)
+
+        page = 1
+        total_exported = 0
+
+        try:
+            while True:
+                data, has_next = await connector.get_conversion(
+                    start_date=start_date_str,
+                    end_date=end_date_str,
+                    # status=status,
+                    # advertiser_id=advertiser_id,
+                    # currency=currency,
+                    page=str(page),
+                    limit=str(limit),
+                )
+
+                if data:
+                    result = exporter.export(
+                        data=data,
+                        column_mapping=column_mapping,
+                        keys=keys,
+                        keys_mode=keys_mode,
+                        conflict_keys=conflict_keys,
+                        operation_type=operation_type,
+                        retry_count=3,
+                        retry_delay=5,
+                    )
+                    total_exported += result["exported_records"]
+
+                if not has_next:
+                    break
+                page += 1
+        except Exception as e:
+            print(f"Error fetching Ecomobi data: {e}")
+            raise
+
+        print(f"Total exported: {total_exported} records to PostgreSQL table '{table_name}'")
+        return total_exported
+
+    asyncio.run(fetch_and_export_ecomobi_data())
+
+
 local_tz = pendulum.timezone("Asia/Ho_Chi_Minh")
 with DAG(
     dag_display_name="[ADS] - Download report data",
@@ -391,6 +463,14 @@ with DAG(
         # provide_context=True,
     )
 
+    export_ecomobi_to_postgres_task = PythonOperator(
+        task_display_name="Download Ecomobi conversions to PostgreSQL",
+        task_id="get_and_save_ecomobi_data_to_postgres",
+        python_callable=download_and_export_postgres_ecomobi_data,
+        retries=3,
+        retry_delay=timedelta(minutes=2),
+    )
+
     # export_tripcom_to_postgres_task = PythonOperator(
     #     task_display_name="Download Trip.com conversions",
     #     task_id="get_and_save_tripcom_data_to_postgres",
@@ -399,5 +479,5 @@ with DAG(
     #     retries=3,
     #     retry_delay=timedelta(minutes=2),
     # )
-    export_galaksion_to_nocodb_task >> export_involve_to_nocodb_task
+    export_galaksion_to_nocodb_task >> export_involve_to_nocodb_task >> export_ecomobi_to_postgres_task
     # >> export_tripcom_to_postgres_task

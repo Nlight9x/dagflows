@@ -298,7 +298,6 @@ def download_and_export_postgres_tripcom_data(**context):
     table_name = Variable.get("tripcom_table_name", default="Tripcom Conversions")
     
     keys = Variable.get("tripcom_keys", default=None)
-    keys_mode = Variable.get("tripcom_keys_mode", default="include")
     conflict_keys = Variable.get("tripcom_conflict_keys", default='["orderId"]')
     operation_type = Variable.get("tripcom_operation_type", default="upsert")
     column_mapping = Variable.get("tripcom_column_mapping", default=None)
@@ -340,7 +339,6 @@ def download_and_export_postgres_tripcom_data(**context):
                         data=data,
                         column_mapping=json.loads(column_mapping) if column_mapping is not None else None,
                         keys=json.loads(keys) if keys is not None else None,
-                        keys_mode=keys_mode,
                         conflict_keys=json.loads(conflict_keys) if conflict_keys is not None else None,
                         operation_type=operation_type,
                         retry_count=3,
@@ -367,7 +365,7 @@ def download_and_export_postgres_tripcom_data(**context):
 
 
 def download_and_export_postgres_ecomobi_data(**context):
-    """Download Ecomobi (Ecotrackings) conversions and export to PostgreSQL."""
+    """Download Ecomobi conversions and export to PostgreSQL with config-driven mapping."""
     ecomobi_config = json.loads(Variable.get("ecomobi_config", default="{}"))
     token_private = ecomobi_config.get("token_private")
 
@@ -376,14 +374,10 @@ def download_and_export_postgres_ecomobi_data(**context):
 
     table_name = ecomobi_config.get("table_name", "ecomobi_conversions")
     keys = ecomobi_config.get("keys")
-    keys_mode = ecomobi_config.get("keys_mode", "include")
     conflict_keys = ecomobi_config.get("conflict_keys", ["_id"])
     operation_type = ecomobi_config.get("operation_type", "upsert")
     column_mapping = ecomobi_config.get("column_mapping")
     limit = int(ecomobi_config.get("limit", 100))
-    status = ecomobi_config.get("status")
-    advertiser_id = ecomobi_config.get("advertiser_id")
-    currency = ecomobi_config.get("currency")
 
     if not token_private:
         raise ValueError("Missing 'token_private' in Airflow Variable 'ecomobi_config'.")
@@ -403,21 +397,13 @@ def download_and_export_postgres_ecomobi_data(**context):
         try:
             while True:
                 data, has_next = await connector.get_conversion(
-                    start_date=start_date_str,
-                    end_date=end_date_str,
-                    # status=status,
-                    # advertiser_id=advertiser_id,
-                    # currency=currency,
-                    page=str(page),
-                    limit=str(limit),
-                )
+                    start_date=start_date_str, end_date=end_date_str, page=str(page), limit=str(limit))
 
                 if data:
                     result = exporter.export(
                         data=data,
                         column_mapping=column_mapping,
                         keys=keys,
-                        keys_mode=keys_mode,
                         conflict_keys=conflict_keys,
                         operation_type=operation_type,
                         retry_count=3,

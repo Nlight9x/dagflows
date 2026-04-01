@@ -55,37 +55,86 @@ class PostgresDriver:
                     return cursor.fetchall()
                 conn.commit()
                 return cursor.rowcount
+
+    def _resolve_source_spec(self, source_spec, record):
+        if isinstance(source_spec, str):
+            return record.get(source_spec)
+        if isinstance(source_spec, list):
+            for source_key in source_spec:
+                if isinstance(source_key, str):
+                    value = record.get(source_key)
+                    if value is not None:
+                        return value
+            return None
+        if isinstance(source_spec, dict):
+            source_key = source_spec.get("source")
+            default_value = source_spec.get("default")
+            if isinstance(source_key, str):
+                return record.get(source_key, default_value)
+            return default_value
+        return source_spec
+
+    def _prepare_projection(self, data, keys: list = None, column_mapping: dict = None):
+        """
+        Returns:
+            source_fields: list of source keys/specs used to read record values
+            target_columns: list of DB columns used in SQL
+            values_builder: callable(record) -> list of values aligned with target_columns
+        """
+        if not data or len(data) == 0:
+            return [], [], lambda _r: []
+
+        # Only one mapping format is supported: target_column -> source_spec
+        # source_spec can be: str | list[str] | {"source": str, "default": any} | literal
+        if not column_mapping:
+            available_targets = list(data[0].keys())
+            mapping = {k: k for k in available_targets}
+        elif isinstance(column_mapping, dict):
+            available_targets = list(column_mapping.keys())
+            mapping = column_mapping
+        else:
+            raise ValueError("column_mapping must be a dict of target_column -> source_spec")
+
+        if keys is None:
+            target_columns = available_targets
+        else:
+            target_columns = [k for k in keys if k in available_targets]
+
+        source_fields = [mapping.get(col, col) for col in target_columns]
+
+        def values_builder(record):
+            return [self._resolve_source_spec(spec, record) for spec in source_fields]
+
+        return source_fields, target_columns, values_builder
     
-    def batch_insert(self, data, table_name, keys=None, keys_mode="include", primary_keys=None, column_mapping=None):
+    def batch_insert(self, data, table_name, keys=None, primary_keys=None, column_mapping=None):
        
         if not data or len(data) <= 0:
             return 0
 
-        if keys is None:
-            target_keys = list(data[0].keys())
-        else:
-            if keys_mode not in ("include", "exclude"):
-                raise ValueError("keys_mode must be 'include' or 'exclude'")
-            if keys_mode == "include":
-                target_keys = [k for k in keys if k in data[0].keys()]
-            else:
-                target_keys = [k for k in data[0].keys() if k not in keys]
-        target_cols = [column_mapping.get(tk, tk) for tk in target_keys] if column_mapping else target_keys
+        source_fields, target_cols, values_builder = self._prepare_projection(data=data, keys=keys, column_mapping=column_mapping)
+        if not target_cols:
+            raise ValueError("No columns to insert after applying keys and mapping")
 
         target_cols_str = '"' + '", "'.join(target_cols) + '"'
         
         # Build query
         if primary_keys and len(primary_keys) > 0:
-            primary_cols = [column_mapping.get(pk, pk) for pk in primary_keys]
+            # conflict keys are expected to be target DB columns
+            primary_cols = primary_keys
             # UPSERT path
             update_cols = [col for col in target_cols if col not in primary_cols]
-            update_clause = ', '.join([f"\"{col}\" = EXCLUDED.\"{col}\"" for col in update_cols])
             primary_cols_str = '"' + '", "'.join(primary_cols) + '"'
+            if update_cols:
+                update_clause = ', '.join([f"\"{col}\" = EXCLUDED.\"{col}\"" for col in update_cols])
+                conflict_action_sql = f"DO UPDATE SET {update_clause}"
+            else:
+                conflict_action_sql = "DO NOTHING"
             insert_query = f"""
                 INSERT INTO "{table_name}" ({target_cols_str}) 
                 VALUES %s
                 ON CONFLICT ({primary_cols_str}) 
-                DO UPDATE SET {update_clause}
+                {conflict_action_sql}
             """
         else:
             # Plain INSERT path
@@ -96,7 +145,7 @@ class PostgresDriver:
         # Prepare data
         batch = []
         for record in data:
-            values = [record.get(k) for k in target_keys]
+            values = values_builder(record)
             batch.append(values)
         
         # Insert in batches
@@ -106,32 +155,19 @@ class PostgresDriver:
                 conn.commit()
         return len(batch)
 
-    def merge(self, data, table_name, keys=None, keys_mode="include", merge_keys=None, column_mapping=None):
+    def merge(self, data, table_name, keys=None, merge_keys=None, column_mapping=None):
         """Merge data using PostgreSQL MERGE syntax (PostgreSQL 15+)"""
         if not data:
             return 0
         if not merge_keys or len(merge_keys) == 0:
             raise ValueError("merge_keys must be provided for MERGE operation")
-        
-        # Determine source columns
-        if keys is None:
-            source_columns = list(data[0].keys())
-        else:
-            if keys_mode not in ("include", "exclude"):
-                raise ValueError("keys_mode must be 'include' or 'exclude'")
-            if keys_mode == "include":
-                source_columns = [c for c in keys if c in data[0].keys()]
-            else:
-                source_columns = [c for c in data[0].keys() if c not in keys]
-        
-        if not source_columns:
+
+        source_columns, target_columns, values_builder = self._prepare_projection(data=data, keys=keys, column_mapping=column_mapping)
+        if not target_columns:
             raise ValueError("No columns to merge after applying keys filter")
-        
-        # Resolve target columns using mapping (without mutating data) 
-        column_mapping = column_mapping or {}
-        target_columns = [column_mapping.get(fd, fd) for fd in source_columns]
-        # Map merge_keys (from data keys) to target DB columns
-        mapped_merge_keys = [column_mapping.get(k, k) for k in merge_keys]
+
+        # merge_keys are expected to be target DB columns
+        mapped_merge_keys = merge_keys
         # Validate all merge keys are present in target columns
         missing_merge_cols = [k for k in mapped_merge_keys if k not in target_columns]
         if missing_merge_cols:
@@ -140,7 +176,7 @@ class PostgresDriver:
         # Prepare data
         values_list = []
         for record in data:
-            values = [record.get(col) for col in source_columns]
+            values = values_builder(record)
             values_list.append(values)
         
         # Build MERGE query
@@ -148,7 +184,11 @@ class PostgresDriver:
         
         # Build WHEN MATCHED clause (update non-key columns)
         update_columns = [col for col in target_columns if col not in mapped_merge_keys]
-        update_clause = ', '.join([f'"{col}" = source."{col}"' for col in update_columns])
+        if update_columns:
+            update_clause = ', '.join([f'"{col}" = source."{col}"' for col in update_columns])
+            when_matched_sql = f'WHEN MATCHED THEN\n                UPDATE SET {update_clause}'
+        else:
+            when_matched_sql = 'WHEN MATCHED THEN\n                DO NOTHING'
         
         # Build WHEN NOT MATCHED clause (insert all columns)
         insert_columns = ', '.join([f'"{c}"' for c in target_columns])
@@ -158,8 +198,7 @@ class PostgresDriver:
             MERGE INTO "{table_name}" AS target
             USING (VALUES %s) AS source ({columns_str})
             ON ({', '.join([f'target."{col}" = source."{col}"' for col in mapped_merge_keys])})
-            WHEN MATCHED THEN
-                UPDATE SET {update_clause}
+            {when_matched_sql}
             WHEN NOT MATCHED THEN
                 INSERT ({insert_columns}) VALUES ({insert_values})
         """
@@ -225,17 +264,34 @@ class ClickHouseDriver:
         if fetch:
             return result
         return len(result) if isinstance(result, list) else 0
+
+    def _resolve_source_spec(self, source_spec, record):
+        if isinstance(source_spec, str):
+            return record.get(source_spec)
+        if isinstance(source_spec, list):
+            for source_key in source_spec:
+                if isinstance(source_key, str):
+                    value = record.get(source_key)
+                    if value is not None:
+                        return value
+            return None
+        if isinstance(source_spec, dict):
+            source_key = source_spec.get("source")
+            default_value = source_spec.get("default")
+            if isinstance(source_key, str):
+                return record.get(source_key, default_value)
+            return default_value
+        return source_spec
     
-    def batch_insert(self, data, table_name, keys=None, keys_mode="include", column_mapping=None):
+    def batch_insert(self, data, table_name, keys=None, column_mapping=None):
         """
         Batch insert data into ClickHouse table
         
         Args:
             data: List of dictionaries containing data to insert
             table_name: Target table name
-            keys: List of keys to include/exclude (optional)
-            keys_mode: 'include' or 'exclude' (default: 'include')
-            column_mapping: Dictionary mapping source columns to target columns (optional)
+            keys: List of target columns to export (optional)
+            column_mapping: Dictionary mapping target columns to source specs (optional)
         
         Returns:
             int: Number of records inserted
@@ -243,25 +299,29 @@ class ClickHouseDriver:
         if not data or len(data) == 0:
             return 0
         
-        # Determine which columns to insert
-        if keys is None:
-            target_keys = list(data[0].keys())
+        # Only one mapping format is supported: target_column -> source_spec
+        if not column_mapping:
+            available_targets = list(data[0].keys())
+            mapping = {k: k for k in available_targets}
+        elif isinstance(column_mapping, dict):
+            available_targets = list(column_mapping.keys())
+            mapping = column_mapping
         else:
-            if keys_mode not in ("include", "exclude"):
-                raise ValueError("keys_mode must be 'include' or 'exclude'")
-            if keys_mode == "include":
-                target_keys = [k for k in keys if k in data[0].keys()]
-            else:
-                target_keys = [k for k in data[0].keys() if k not in keys]
-        
-        # Apply column mapping to get target columns
-        column_mapping = column_mapping or {}
-        target_cols = [column_mapping.get(tk, tk) for tk in target_keys]
+            raise ValueError("column_mapping must be a dict of target_column -> source_spec")
+
+        if keys is None:
+            target_cols = available_targets
+        else:
+            target_cols = [k for k in keys if k in available_targets]
+        if not target_cols:
+            raise ValueError("No columns to insert after applying keys and mapping")
+
+        source_specs = [mapping.get(col, col) for col in target_cols]
         
         # Prepare data rows
         rows = []
         for record in data:
-            values = [record.get(k) for k in target_keys]
+            values = [self._resolve_source_spec(spec, record) for spec in source_specs]
             rows.append(tuple(values))
         
         # Insert data into ClickHouse

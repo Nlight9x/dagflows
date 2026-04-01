@@ -92,7 +92,6 @@ class PostgresSQLExporter(StorageExporter):
         column_mapping = settings.get('column_mapping', {})
         
         keys = settings.get('keys')
-        keys_mode = settings.get('keys_mode', 'include')
         conflict_keys = settings.get('conflict_keys')  # Keys để xác định trùng dữ liệu
         operation_type = settings.get('operation_type', 'insert')  # 'insert', 'upsert', 'merge'
 
@@ -104,19 +103,19 @@ class PostgresSQLExporter(StorageExporter):
                 if operation_type == 'merge' and conflict_keys:
                     # Use MERGE syntax for upsert
                     total_processed = self._driver.merge(
-                        data, self._table_name,  keys=keys, keys_mode=keys_mode, merge_keys=conflict_keys, column_mapping=column_mapping
+                        data, self._table_name,  keys=keys, merge_keys=conflict_keys, column_mapping=column_mapping
                     )
                     operation = "merge"
                 elif operation_type == 'upsert' and conflict_keys:
                     # Use batch_insert with ON CONFLICT for upsert
                     total_processed = self._driver.batch_insert(
-                        data, self._table_name, keys=keys, keys_mode=keys_mode, primary_keys=conflict_keys, column_mapping=column_mapping
+                        data, self._table_name, keys=keys, primary_keys=conflict_keys, column_mapping=column_mapping
                     )
                     operation = "upsert"
                 else:
                     # Use batch_insert for plain insert
                     total_processed = self._driver.batch_insert(
-                        data, self._table_name,  keys=keys, keys_mode=keys_mode, column_mapping=column_mapping
+                        data, self._table_name,  keys=keys, column_mapping=column_mapping
                     )
                     operation = "insert"
 
@@ -164,9 +163,8 @@ class ClickHouseExporter(StorageExporter):
             data: List of dictionaries containing data to export
             settings: Additional settings including:
                 - batch_size: Number of records to insert per batch (default: 1000)
-                - column_mapping: Dictionary mapping source columns to target columns
-                - keys: List of keys to include/exclude
-                - keys_mode: 'include' or 'exclude' (default: 'include')
+                - column_mapping: Dictionary mapping target columns to source specs
+                - keys: List of target columns to export
         
         Returns:
             dict: Result containing exported_records, table name
@@ -178,7 +176,6 @@ class ClickHouseExporter(StorageExporter):
         
         column_mapping = settings.get('column_mapping', {})
         keys = settings.get('keys')
-        keys_mode = settings.get('keys_mode', 'include')
         batch_size = settings.get('batch_size', 1000)
         
         # Execute operation with retry logic
@@ -191,13 +188,13 @@ class ClickHouseExporter(StorageExporter):
                     for i in range(0, len(data), batch_size):
                         batch = data[i:i + batch_size]
                         batch_processed = self._driver.batch_insert(
-                            batch, self._table_name, keys=keys, keys_mode=keys_mode, column_mapping=column_mapping
+                            batch, self._table_name, keys=keys, column_mapping=column_mapping
                         )
                         total_processed += batch_processed
                 else:
                     # Insert all data at once if batch_size is 0 or None
                     total_processed = self._driver.batch_insert(
-                        data, self._table_name, keys=keys, keys_mode=keys_mode, column_mapping=column_mapping
+                        data, self._table_name, keys=keys, column_mapping=column_mapping
                     )
                 
                 return {

@@ -182,6 +182,7 @@ class EcomobiAsyncConnector(AffAsyncConnector):
                         data = res_body.get("data")
                         payout_field = ["payout_pending", "payout_expect", "payout_approved", "payout_rejected"]
                         for r in data:
+                            r['sale_amount'] = f"{r['sale_amount']:,.0f} VND"
                             for f in payout_field:
                                 if r[f] not in [None, 0, 0.0]:
                                     r['payout'] = f"{r[f]:,.0f} VND"

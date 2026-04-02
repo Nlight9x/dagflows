@@ -372,9 +372,9 @@ def download_and_export_postgres_ecomobi_data(**context):
     postgres_config = Variable.get("postgres_db_connection_info")
     postgres_config = json.loads(postgres_config)
 
-    table_name = ecomobi_config.get("table_name", "ecomobi_conversions")
+    table_name = ecomobi_config.get("table_name")
     keys = ecomobi_config.get("keys")
-    conflict_keys = ecomobi_config.get("conflict_keys", ["_id"])
+    conflict_keys = ecomobi_config.get("conflict_keys", ["id"])
     operation_type = ecomobi_config.get("operation_type", "upsert")
     column_mapping = ecomobi_config.get("column_mapping")
     limit = int(ecomobi_config.get("limit", 100))
@@ -385,9 +385,14 @@ def download_and_export_postgres_ecomobi_data(**context):
     async def fetch_and_export_ecomobi_data():
         connector = EcomobiAsyncConnector(token_private=token_private)
 
-        data_date = _get_data_date(**context)
-        start_date_str = end_date_str = data_date.strftime("%Y-%m-%d")
-        print(f"Fetching Ecomobi conversions for {start_date_str}")
+        # Calculate date range: 3 months from current date
+        end_date = _get_data_date(context)
+        start_date = end_date - timedelta(days=90)  # Approximately 3 months
+
+        start_date_str = start_date.strftime("%Y-%m-%d")
+        end_date_str = end_date.strftime("%Y-%m-%d")
+
+        print(f"Fetching Ecomobi data from {start_date_str} to {end_date_str}")
 
         exporter = PostgresSQLExporter(table_name=table_name, **postgres_config)
 

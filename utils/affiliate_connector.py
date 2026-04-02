@@ -1,5 +1,6 @@
 import httpx
 import asyncio
+from datetime import datetime
 
 _empty_dict = {}
 
@@ -181,7 +182,9 @@ class EcomobiAsyncConnector(AffAsyncConnector):
                     if isinstance(res_body.get("data"), list):
                         data = res_body.get("data")
                         payout_field = ["payout_pending", "payout_expect", "payout_approved", "payout_rejected"]
+                        updated_date = datetime.now()
                         for r in data:
+                            r['update_date'] = updated_date.strftime("%Y-%m-%d %H:%M:%S")
                             r['id'] = int(r['adv_order_id'])
                             r['sale_amount'] = f"{r['sale_amount']:,.0f} VND"
                             for f in payout_field:
@@ -247,11 +250,12 @@ async def _test_ecomobi():
     if all_rows:
         # print("FIRST ROW:", all_rows[0])
         order_ids = set()
+        import json
         for r in all_rows:
             order_ids.add(r.get('adv_order_id'))
             # print(r)
             if r.get('sub1') is not None:
-                print(r)
+                print(json.dumps(r, indent=2))
         print(f"TOTAL set order_id: {len(order_ids)}")
 
 if __name__ == "__main__":

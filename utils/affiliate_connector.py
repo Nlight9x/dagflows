@@ -184,7 +184,7 @@ class EcomobiAsyncConnector(AffAsyncConnector):
                         payout_field = ["payout_pending", "payout_expect", "payout_approved", "payout_rejected"]
                         updated_date = datetime.now()
                         for r in data:
-                            r['update_date'] = updated_date.strftime("%Y-%m-%d %H:%M:%S")
+                            r['updated_date'] = updated_date.strftime("%Y-%m-%d %H:%M:%S")
                             r['id'] = int(r['adv_order_id'])
                             r['sale_amount'] = f"{r['sale_amount']:,.0f} VND"
                             for f in payout_field:

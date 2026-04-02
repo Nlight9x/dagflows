@@ -386,7 +386,7 @@ def download_and_export_postgres_ecomobi_data(**context):
         connector = EcomobiAsyncConnector(token_private=token_private)
 
         # Calculate date range: 3 months from current date
-        end_date = _get_data_date(context)
+        end_date = _get_data_date(**context)
         start_date = end_date - timedelta(days=90)  # Approximately 3 months
 
         start_date_str = start_date.strftime("%Y-%m-%d")

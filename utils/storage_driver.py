@@ -151,6 +151,7 @@ class PostgresDriver:
         # Insert in batches
         with self.get_connection() as conn:
             with conn.cursor() as cursor:
+                print(insert_query)
                 execute_values(cursor, insert_query, batch)
                 conn.commit()
         return len(batch)

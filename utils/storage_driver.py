@@ -66,6 +66,8 @@ class PostgresDriver:
                     if value is not None:
                         return value
             return None
+        print(f"Is dict: {isinstance(source_spec, dict)}")
+        print(source_spec)
         if isinstance(source_spec, dict):
             source_key = source_spec.get("source")
             default_value = source_spec.get("default")

@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS `default`.`securities_minute_data`
     `volume` Nullable(Float64),
     `date` Date
 )
-ENGINE = MergeTree()
+ENGINE = ReplacingMergeTree()
 PARTITION BY toYYYYMMDD(date)
 ORDER BY (symbol, timestamp)
 SETTINGS index_granularity = 8192;

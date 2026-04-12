@@ -42,6 +42,15 @@ _resolution_convert_map = {
     "1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30, "1h": 60, "2h": 120, "1d": 1440, "1w": 10080
 }
 
+_default_column_mapping = {
+    "symbol": "symbol",
+    "time": "datetime",
+    "open": "open",
+    "high": "high",
+    "low": "low",
+    "close": "close",
+    "volume": "volume"
+}
 
 def normalize_symbol(market_type, symbol, c_date=date.today()):
     if 'derivative' == market_type:
@@ -412,7 +421,7 @@ def push_to_clickhouse(resolution, table_name, dag_config, **context):
 
                 # print(records_df)
                 batch_size = int(dag_config.get('export_batch_size', 1000))
-                result = export_records_to_clickhouse(exporter, records_df, batch_size=batch_size)
+                result = export_records_to_clickhouse(exporter, records_df, batch_size=batch_size, column_mapping=_default_column_mapping)
                 exported_count = result.get('exported_records', 0)
                 total_exported += exported_count
                 print(f"Exported {exported_count} {resolution} records for {symbol} -> {table_name}")

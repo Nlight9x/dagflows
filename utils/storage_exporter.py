@@ -219,7 +219,7 @@ class ClickHouseExporter(StorageExporter):
         """Close the underlying driver connection"""
         self._driver.close_pool()
 
-    def delete_by_symbol_and_date(self, dates, symbols=None, date_column='date', symbol_column='symbol'):
+    def delete_by_symbol_and_date(self, dates, symbols=None, date_column='time', symbol_column='symbol'):
         """Delete existing rows for specified dates and symbols before inserting new data"""
         if not dates:
             return 0

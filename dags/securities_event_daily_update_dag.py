@@ -229,7 +229,7 @@ def push_event_to_clickhouse(table_name, dag_config, **context):
     ]
     dates_to_delete = [from_date.date() + timedelta(days=i) for i in range(back_days + 1)]
     print("Delete old records.")
-    exporter.delete_by_symbol_and_date(dates=dates_to_delete, symbols=symbols_to_delete)
+    exporter.delete_by_symbol_and_date(dates=dates_to_delete, symbols=symbols_to_delete, date_column='date')
 
     total_exported = 0
     results = []

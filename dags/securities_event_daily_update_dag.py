@@ -38,6 +38,12 @@ DEFAULT_DAG_CONFIG = {
     "export_batch_size": 1000,
 }
 
+_default_column_mapping = {
+    "symbol": "symbol",
+    "timestamp": "timestamp",
+    "date": "date",
+    "event": "event"
+}
 
 def _get_param_defaults_from_base_config(raw_config):
     """Get default values for params from Variable (only for specified fields)"""
@@ -259,8 +265,7 @@ def push_event_to_clickhouse(table_name, dag_config, **context):
                 continue
 
             batch_size = int(dag_config.get('export_batch_size', 1000))
-            export_keys = ['symbol', 'timestamp', 'date', 'event']
-            result = export_records_to_clickhouse(exporter, df, batch_size=batch_size, keys=export_keys)
+            result = export_records_to_clickhouse(exporter, df, batch_size=batch_size, column_mapping=_default_column_mapping)
             exported_count = result.get('exported_records', 0)
             total_exported += exported_count
             print(f"Exported {exported_count} event records for {symbol} -> {table_name}")

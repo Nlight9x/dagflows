@@ -259,7 +259,7 @@ def push_event_to_clickhouse(table_name, dag_config, **context):
                 continue
 
             batch_size = int(dag_config.get('export_batch_size', 1000))
-            export_keys = [col for col in df.columns if col != 'datetime']
+            export_keys = ['symbol', 'timestamp', 'date', 'event']
             result = export_records_to_clickhouse(exporter, df, batch_size=batch_size, keys=export_keys)
             exported_count = result.get('exported_records', 0)
             total_exported += exported_count

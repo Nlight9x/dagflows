@@ -38,7 +38,7 @@ from default.vnstock_events;
 
 
 -- DROP DICTIONARY vnstock_price_adjustment_dict
-CREATE DICTIONARY vnstock_price_adjustment_dict
+CREATE DICTIONARY price_db.vnstock_price_adjustment_dict
 (
     symbol String,
     min_date Date,
@@ -55,7 +55,7 @@ SOURCE(CLICKHOUSE(
             (ex_date - interval ''1'' day) AS max_date,
             adjust_rate as base_adjust_rate,
             exp(sum(log(adjust_rate)) OVER (PARTITION BY symbol ORDER BY ex_date DESC)) AS adjust_cum_rate
-        FROM vn_corporate_actions'
+        FROM price_db.vn_corporate_actions'
     USER 'clickhouse'
     PASSWORD 'PWjdDM@ANvZnule+'
     DB 'price_db'))
@@ -125,5 +125,6 @@ SELECT
     argMaxMerge(close) as close,
     sumMerge(volume) as volume
 FROM price_db.vnstock_1d_realtime
-where toDate(time) > toDate(current_timestamp(), 'Asia/Ho_Chi_Minh')
+where toDate(time) >= toDate(current_timestamp(), 'Asia/Ho_Chi_Minh')
 GROUP BY symbol, time
+-- order by time desc

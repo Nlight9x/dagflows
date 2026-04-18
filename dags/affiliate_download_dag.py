@@ -1,7 +1,7 @@
 from airflow.sdk import DAG
 from airflow.providers.standard.operators.python import PythonOperator
 from airflow.sdk import Variable
-from datetime import datetime, timedelta
+from datetime import datetime, date, timedelta
 import asyncio
 import os
 import json
@@ -387,7 +387,7 @@ def download_and_export_postgres_ecomobi_data(**context):
 
         # Calculate date range: 3 months from current date
         end_date = _get_data_date(**context)
-        start_date = end_date - timedelta(days=90)  # Approximately 3 months
+        start_date = max(end_date - timedelta(days=90), date(2026, 4, 1))  # Approximately 3 months
 
         start_date_str = start_date.strftime("%Y-%m-%d")
         end_date_str = end_date.strftime("%Y-%m-%d")

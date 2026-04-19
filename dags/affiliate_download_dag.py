@@ -403,7 +403,7 @@ def download_and_export_postgres_ecomobi_data(**context):
             while True:
                 data, has_next = await connector.get_conversion(
                     start_date=start_date_str, end_date=end_date_str, page=str(page), limit=str(limit))
-
+                print(data)
                 if data:
                     result = exporter.export(
                         data=data,

@@ -233,8 +233,8 @@ async def _test_ecomobi():
 
     while True:
         rows, has_next = await connector.get_conversion(
-            start_date="2026-03-21",
-            end_date="2026-03-31",
+            start_date="2026-04-01",
+            end_date="2026-04-31",
             # status="approved",
             limit=str(limit),
             page=str(page),

@@ -5,23 +5,32 @@
 --   clickhouse-client --query "$(cat securities_table_schema.sql)"
 -- Or copy and paste into ClickHouse client
 
-CREATE TABLE IF NOT EXISTS `default`.`securities_minute_data`
-(
-    `symbol` String,
-    `timestamp` UInt32,
-    `datetime` DateTime,
-    `open` Nullable(Float64),
-    `high` Nullable(Float64),
-    `low` Nullable(Float64),
-    `close` Nullable(Float64),
-    `volume` Nullable(Float64),
-    `date` Date
-)
-ENGINE = ReplacingMergeTree()
-PARTITION BY toYYYYMMDD(date)
-ORDER BY (symbol, timestamp)
+CREATE TABLE IF NOT EXISTS price_db.vn_derivative_1d_hist  (
+    symbol String,
+    time DateTime64(3, 'Asia/Ho_Chi_Minh'),
+    open Nullable(Float64),
+    high Nullable(Float64),
+    low Nullable(Float64),
+    close Nullable(Float64),
+    volume Nullable(Float64)
+) ENGINE = ReplacingMergeTree()
+PARTITION BY toYear(time)
+ORDER BY (symbol, time)
 SETTINGS index_granularity = 8192;
 
+
+CREATE TABLE IF NOT EXISTS price_db.vn_derivative_1m_hist (
+    symbol String,
+    time DateTime64(3, 'Asia/Ho_Chi_Minh'),
+    open Nullable(Float64),
+    high Nullable(Float64),
+    low Nullable(Float64),
+    close Nullable(Float64),
+    volume Nullable(Float64)
+) ENGINE = ReplacingMergeTree()
+PARTITION BY toYYYYMMDD(time)
+ORDER BY (symbol, time)
+SETTINGS index_granularity = 8192;
 -- To customize database and table name, modify above:
 -- - Replace `default` with your database name
 -- - Replace `securities_minute_data` with your table name

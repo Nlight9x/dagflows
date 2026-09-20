@@ -22,10 +22,8 @@ from utils.alert_connector import TelegramAlert
 # Import shared helper functions from securities_daily_update_dag
 from dags.securities_daily_update_dag import (
     _get_data_date,
-    _get_data_range_date,
     _get_data_dir,
     _cleanup_old_shared_data,
-    export_records_to_clickhouse,
 )
 
 DEFAULT_DAG_CONFIG = {
@@ -44,6 +42,28 @@ _default_column_mapping = {
     "date": "date",
     "event": "event"
 }
+
+
+def _get_event_data_range(dag_config, **context):
+    """Return full calendar days for an event refresh.
+
+    Event rows are deleted by calendar date, so the download window must cover
+    those same complete dates.  The shared price helper starts from 23:59:59
+    on the earlier day, which is unsuitable for event snapshots.
+    """
+    back_days = int(dag_config.get("back_days", 1))
+    data_end = _get_data_date(dag_config, **context)
+    end_day = data_end.date()
+    start_day = end_day - timedelta(days=back_days)
+    from_date = datetime.combine(start_day, datetime.min.time(), tzinfo=data_end.tzinfo)
+    to_date = datetime.combine(end_day, datetime.max.time(), tzinfo=data_end.tzinfo)
+    return from_date, to_date, back_days
+
+
+def _get_event_dates_to_refresh(from_date, to_date):
+    """List every calendar date covered by an event download window."""
+    total_days = (to_date.date() - from_date.date()).days
+    return [from_date.date() + timedelta(days=offset) for offset in range(total_days + 1)]
 
 def _get_param_defaults_from_base_config(raw_config):
     """Get default values for params from Variable (only for specified fields)"""
@@ -134,7 +154,7 @@ def download_vnstock_event(dag_config, **context):
 
     symbols = dag_config.get('symbols')
 
-    from_date, to_date, back_days = _get_data_range_date(dag_config, **context)
+    from_date, to_date, back_days = _get_event_data_range(dag_config, **context)
     date_str = to_date.strftime("%Y-%m-%d")
 
     print(f"Downloading securities event data.")
@@ -198,7 +218,7 @@ def push_event_to_clickhouse(table_name, dag_config, **context):
     # Merge params into config (only for specified fields)
     dag_config = _to_runtime_dag_config(dag_config, **context)
     
-    from_date, to_date, back_days = _get_data_range_date(dag_config, **context)
+    from_date, to_date, back_days = _get_event_data_range(dag_config, **context)
 
     clickhouse_config = dag_config.get('clickhouse_connection_config')
     if isinstance(clickhouse_config, str):
@@ -222,58 +242,63 @@ def push_event_to_clickhouse(table_name, dag_config, **context):
     clickhouse_config['table_name'] = table_name
     exporter = ClickHouseExporter(**clickhouse_config)
     
-    # Get all symbols from downloaded files
-    symbols_to_delete = [
-        f.get('symbol') for f in metadata['downloaded_files'] 
-        if f.get('status') == 'success' and f.get('symbol')
-    ]
-    dates_to_delete = [from_date.date() + timedelta(days=i) for i in range(back_days + 1)]
-    print("Delete old records.")
-    exporter.delete_by_symbol_and_date(dates=dates_to_delete, symbols=symbols_to_delete, date_column='date')
+    dates_to_refresh = _get_event_dates_to_refresh(from_date, to_date)
 
     total_exported = 0
     results = []
 
-    for file_info in metadata['downloaded_files']:
-        if file_info.get('status') != 'success':
-            continue
-        file_path = file_info.get('file_path')
-        if not file_path or not os.path.exists(file_path):
-            continue
-        symbol = file_info.get('symbol', 'UNKNOWN')
-
-        try:
-            if not file_path.endswith('.csv'):
-                print(f"Skipping non-CSV file: {file_path}")
+    try:
+        for file_info in metadata['downloaded_files']:
+            if file_info.get('status') != 'success':
+                continue
+            file_path = file_info.get('file_path')
+            symbol = file_info.get('symbol')
+            if not file_path or not os.path.exists(file_path) or not symbol:
                 continue
 
-            df = pd.read_csv(file_path, parse_dates=['datetime'])
-            if df.empty or df['datetime'].isna().any():
-                print(f"Skipping file due to invalid datetime values: {file_path}")
-                continue
+            try:
+                if not file_path.endswith('.csv'):
+                    raise ValueError(f"Expected a CSV file, got: {file_path}")
 
-            if 'timestamp' not in df.columns:
-                df['timestamp'] = (pd.to_datetime(df['datetime']).view('int64') // 10**9).astype(int)
+                # Validate the complete source snapshot before deleting anything.
+                df = pd.read_csv(file_path, parse_dates=['datetime'])
+                required_columns = {'symbol', 'timestamp', 'datetime', 'event'}
+                missing_columns = required_columns - set(df.columns)
+                if missing_columns:
+                    raise ValueError(f"Missing required event columns: {sorted(missing_columns)}")
+                if not df.empty and df['datetime'].isna().any():
+                    raise ValueError("Event file contains invalid datetime values")
 
-            # Event data doesn't need aggregation, just ensure symbol and date columns exist
-            if 'symbol' not in df.columns:
-                df['symbol'] = symbol
-            if 'date' not in df.columns:
-                df['date'] = pd.to_datetime(df['datetime']).dt.date
+                # A valid empty file means the source has no events for this
+                # symbol in the refreshed dates, so it must still clear stale rows.
+                print(f"Replacing event snapshot for {symbol} on {dates_to_refresh}")
+                exporter.delete_by_symbol_and_date(
+                    dates=dates_to_refresh,
+                    symbols=[symbol],
+                    date_column='date',
+                )
 
-            if df.empty:
-                continue
+                exported_count = 0
+                if not df.empty:
+                    if 'date' not in df.columns:
+                        df['date'] = pd.to_datetime(df['datetime']).dt.date
+                    batch_size = int(dag_config.get('export_batch_size', 1000))
+                    result = exporter.export(
+                        data=df.to_dict(orient='records'),
+                        batch_size=batch_size,
+                        column_mapping=_default_column_mapping,
+                    )
+                    exported_count = result.get('exported_records', 0)
 
-            batch_size = int(dag_config.get('export_batch_size', 1000))
-            result = export_records_to_clickhouse(exporter, df, batch_size=batch_size, column_mapping=_default_column_mapping)
-            exported_count = result.get('exported_records', 0)
-            total_exported += exported_count
-            print(f"Exported {exported_count} event records for {symbol} -> {table_name}")
-            results.append({'symbol': symbol, 'exported_records': exported_count, 'status': 'success'})
+                total_exported += exported_count
+                print(f"Exported {exported_count} event records for {symbol} -> {table_name}")
+                results.append({'symbol': symbol, 'exported_records': exported_count, 'status': 'success'})
 
-        except Exception as e:
-            print(f"Error processing event data for {symbol}: {e}")
-            results.append({'symbol': symbol, 'exported_records': 0, 'status': 'failed', 'error': str(e)})
+            except Exception as e:
+                print(f"Error processing event data for {symbol}: {e}")
+                results.append({'symbol': symbol, 'exported_records': 0, 'status': 'failed', 'error': str(e)})
+    finally:
+        exporter.close()
 
     summary = {
         'date': to_date.strftime("%Y-%m-%d"),
@@ -309,7 +334,7 @@ def notify_telegram_event(dag_config, **context):
         print("   Add 'telegram_config' with 'bot_token' and 'chat_id' to enable notifications.")
         return None
     
-    from_date, to_date, back_days = _get_data_range_date(dag_config, **context)
+    from_date, to_date, back_days = _get_event_data_range(dag_config, **context)
     data_dir = _get_data_dir(dag_config, to_date)
     date_str = to_date.strftime("%Y-%m-%d")
     
